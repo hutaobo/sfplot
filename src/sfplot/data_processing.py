@@ -1,5 +1,5 @@
 import os
-
+import tarfile
 import pandas as pd
 import scanpy as sc
 from spatialdata_io import xenium
@@ -37,10 +37,31 @@ def load_xenium_data(folder: str):
     # 2. 将该样本的 AnnData 对象拷贝出来，避免修改原始的 sdata
     adata = sdata.tables["table"].copy()
 
-    # 3. 构建 cluster 信息文件的路径
+    # 3. 优先检查是否已经存在解压后的 clusters.csv 文件
+    #    期望解压后的路径：folder/analysis/clustering/gene_expression_graphclust/clusters.csv
     cluster_path = os.path.join(
         folder, "analysis", "clustering", "gene_expression_graphclust", "clusters.csv"
     )
+
+    if not os.path.exists(cluster_path):
+        # 如果不存在，就尝试解压 analysis.tar.gz
+        tar_path = os.path.join(folder, "analysis.tar.gz")
+        if not os.path.exists(tar_path):
+            raise FileNotFoundError(
+                f"未找到已解压的 {cluster_path}，也未找到压缩文件 {tar_path}！"
+            )
+
+        print("未检测到已解压的 analysis 文件夹，准备解压 analysis.tar.gz...")
+
+        # 解压到与 analysis 同级的位置（即解压到 folder 下）
+        with tarfile.open(tar_path, "r:gz") as tar:
+            tar.extractall(folder)
+
+        # 解压完成后再次检查 cluster_path
+        if not os.path.exists(cluster_path):
+            raise FileNotFoundError(
+                f"解压后仍未找到 {cluster_path}，请确认压缩包内是否包含正确的文件路径。"
+            )
 
     # 4. 读取 cluster 文件（包含每个 Barcode 对应的 Cluster 信息）
     cluster = pd.read_csv(cluster_path)
