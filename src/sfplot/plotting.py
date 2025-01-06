@@ -11,7 +11,12 @@ from typing import Optional
 from .data_processing import load_xenium_data  # 确保这个导入路径正确
 
 
-def generate_cluster_distance_heatmap_from_path(base_path: str, sample: str, output_dir: Optional[str] = None):
+def generate_cluster_distance_heatmap_from_path(
+    base_path: str,
+    sample: str,
+    figsize: tuple = (8, 8),
+    output_dir: Optional[str] = None
+):
     """
     生成并保存每个细胞群到最近群中心的距离热图。
 
@@ -95,11 +100,11 @@ def generate_cluster_distance_heatmap_from_path(base_path: str, sample: str, out
         return
 
     # 用 clustermap 对该矩阵进行聚类可视化
-    plt.figure(figsize=(7, 7))
+    plt.figure(figsize=figsize)
     g = sns.clustermap(
         df_group_mean_clean,
         cmap="RdBu",
-        figsize=(7, 7),
+        figsize=figsize,
         row_cluster=True,
         col_cluster=True,
         linewidths=0.5,
@@ -130,7 +135,7 @@ def generate_cluster_distance_heatmap_from_adata(
     cluster_col: str = "Cluster",
     output_dir: Optional[str] = None,
     output_filename: Optional[str] = None,
-    figsize: tuple = (7, 7),
+    figsize: tuple = (8, 8),
     cmap: str = "RdBu",
     max_scale: float = 10
 ):
