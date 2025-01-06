@@ -120,7 +120,7 @@ def generate_cluster_distance_heatmap_from_path(
     g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
 
     # 设置整个图形的标题，而不是 heatmap 的标题
-    g.fig.suptitle(f"{sample} Cluster Distance Heatmap", fontsize=12, y=1)
+    g.fig.suptitle(f"SFplot of {sample}", fontsize=12, y=1)
 
     # 7. 保存为带有样本名的 PDF
     output_file = os.path.join(output_dir, f"SFplot_of_{sample}.pdf")
@@ -253,7 +253,7 @@ def generate_cluster_distance_heatmap_from_adata(
 
     # 设置整个图形的标题，而不是 heatmap 的标题
     sample = adata.uns.get("sample", "Sample")  # 假设你在 adata.uns 中保存了样本名
-    g.fig.suptitle(f"{sample} Cluster Distance Heatmap", fontsize=12, y=1)
+    g.fig.suptitle(f"SFplot of {sample}", fontsize=12, y=1)
 
     # 7. 保存为带有样本名的 PDF
     if output_filename is None:
