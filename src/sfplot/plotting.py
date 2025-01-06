@@ -118,7 +118,7 @@ def generate_cluster_distance_heatmap_from_path(base_path: str, sample: str, out
     g.fig.suptitle(f"{sample} Cluster Distance Heatmap", fontsize=12, y=1)
 
     # 7. 保存为带有样本名的 PDF
-    output_file = os.path.join(output_dir, f"clustermap_output_{sample}.pdf")
+    output_file = os.path.join(output_dir, f"SFplot_of_{sample}.pdf")
     plt.savefig(output_file, format="pdf", bbox_inches="tight")
     plt.close()
 
@@ -252,7 +252,7 @@ def generate_cluster_distance_heatmap_from_adata(
 
     # 7. 保存为带有样本名的 PDF
     if output_filename is None:
-        output_filename = f"clustermap_output_{sample}.pdf"
+        output_filename = f"SFplot_of_{sample}.pdf"
     output_file = os.path.join(output_dir, output_filename)
     plt.savefig(output_file, format="pdf", bbox_inches="tight")
     plt.close()

@@ -2,7 +2,7 @@
 
 __author__ = """Taobo Hu"""
 __email__ = 'taobo.hu@scilifelab.se'
-__version__ = '0.1.0'
+__version__ = '0.2.0'
 
 # sfplot/__init__.py
 
