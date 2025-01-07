@@ -109,4 +109,6 @@ def split_B_by_distance_to_A(
     adata.obs.loc[b_close_indices, new_cluster_col] = f"{cluster_B}_close"
     adata.obs.loc[b_far_indices, new_cluster_col] = f"{cluster_B}_far"
 
+    print("The new cluster col is:", new_cluster_col)
+
     return adata
