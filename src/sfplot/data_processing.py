@@ -5,7 +5,7 @@ import scanpy as sc
 from spatialdata_io import xenium
 
 
-def load_xenium_data(folder: str):
+def load_xenium_data(folder: str, normalize: bool = True):
     """
     加载并预处理来自指定文件夹的 10X Xenium 数据，返回处理后的 AnnData 对象。
 
@@ -13,6 +13,8 @@ def load_xenium_data(folder: str):
     --------
     folder : str
         Xenium 数据所在的文件夹路径。
+    normalize : bool, optional
+        是否进行归一化处理。默认值为 True。
 
     返回值:
     --------
@@ -80,13 +82,14 @@ def load_xenium_data(folder: str):
     # 8. 将当前表达矩阵保存到 adata.raw
     adata.raw = adata
 
-    # 9. 归一化总计数，每个细胞总计数标准化为 10,000
-    sc.pp.normalize_total(adata, target_sum=1e4)
+    if normalize:
+        # 9. 归一化总计数，每个细胞总计数标准化为 10,000
+        sc.pp.normalize_total(adata, target_sum=1e4)
 
-    # 10. 进行对数转换（Log1p）
-    sc.pp.log1p(adata)
+        # 10. 进行对数转换（Log1p）
+        sc.pp.log1p(adata)
 
-    # 11. 对数据进行标准化（Z-score），并将绝对值超过 10 的值裁剪至 10
-    sc.pp.scale(adata, max_value=10)
+        # 11. 对数据进行标准化（Z-score），并将绝对值超过 10 的值裁剪至 10
+        sc.pp.scale(adata, max_value=10)
 
     return adata
