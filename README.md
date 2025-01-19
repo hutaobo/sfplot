@@ -1,3 +1,9 @@
+## 安装
+
+```python
+
+```
+
 ## 功能
 
 ### 生成 Cluster Distance Heatmap
