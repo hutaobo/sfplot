@@ -111,8 +111,29 @@ def generate_cluster_distance_heatmap_from_path(
         annot=False
     )
 
-    # 调整热图的纵横比
+    # 设置热图单元格为正方形
     g.ax_heatmap.set_aspect("equal")
+
+    # 修正行 dendrogram 与热图在 y 方向上的对齐
+    # 拿到各自的 (x0, y0, width, height)
+    row_dendro_pos = g.ax_row_dendrogram.get_position()
+    heatmap_pos = g.ax_heatmap.get_position()
+    # 让行 dendrogram 的顶部和底部与热图对齐
+    g.ax_row_dendrogram.set_position([
+        row_dendro_pos.x0,
+        heatmap_pos.y0,          # 用热图的 y0
+        row_dendro_pos.width,
+        heatmap_pos.height       # 用热图的 height
+    ])
+
+    # 同理，修正列 dendrogram 与热图在 x 方向上的对齐（可选）
+    col_dendro_pos = g.ax_col_dendrogram.get_position()
+    g.ax_col_dendrogram.set_position([
+        heatmap_pos.x0,          # 用热图的 x0
+        col_dendro_pos.y0,
+        heatmap_pos.width,       # 用热图的 width
+        col_dendro_pos.height
+    ])
 
     # 设置轴标签和标题
     g.ax_heatmap.set_xlabel("Findee", fontsize=12)
@@ -243,8 +264,29 @@ def generate_cluster_distance_heatmap_from_adata(
         annot=False
     )
 
-    # 调整热图的纵横比
+    # 设置热图单元格为正方形
     g.ax_heatmap.set_aspect("equal")
+
+    # 修正行 dendrogram 与热图在 y 方向上的对齐
+    # 拿到各自的 (x0, y0, width, height)
+    row_dendro_pos = g.ax_row_dendrogram.get_position()
+    heatmap_pos = g.ax_heatmap.get_position()
+    # 让行 dendrogram 的顶部和底部与热图对齐
+    g.ax_row_dendrogram.set_position([
+        row_dendro_pos.x0,
+        heatmap_pos.y0,          # 用热图的 y0
+        row_dendro_pos.width,
+        heatmap_pos.height       # 用热图的 height
+    ])
+
+    # 同理，修正列 dendrogram 与热图在 x 方向上的对齐（可选）
+    col_dendro_pos = g.ax_col_dendrogram.get_position()
+    g.ax_col_dendrogram.set_position([
+        heatmap_pos.x0,          # 用热图的 x0
+        col_dendro_pos.y0,
+        heatmap_pos.width,       # 用热图的 width
+        col_dendro_pos.height
+    ])
 
     # 设置轴标签和标题
     g.ax_heatmap.set_xlabel("Findee", fontsize=12)
