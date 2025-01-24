@@ -79,6 +79,15 @@ def load_xenium_data(folder: str, normalize: bool = True):
     cluster_map = cluster.set_index("Barcode")["Cluster"]
     adata.obs["Cluster"] = adata.obs["cell_id"].map(cluster_map)
 
+    # 导入UMAP信息
+    umap_path = os.path.join(
+        folder, "analysis", "umap", "gene_expression_2_components", "projection.csv"
+    )
+    df_umap = pd.read_csv(umap_path)
+    df_umap = df_umap.set_index("Barcode")
+    # 如果你的 adata.obs_names 跟 df_umap 的 index 完全一致且顺序相同（或可以相互对应），可以直接 loc
+    adata.obsm["X_umap"] = df_umap.loc[adata.obs['cell_id'], ["UMAP-1", "UMAP-2"]].values
+
     # 8. 将当前表达矩阵保存到 adata.raw
     adata.raw = adata
 
