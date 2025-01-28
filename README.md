@@ -1,7 +1,7 @@
 ## 安装
 
 ```python
-
+pip install git+https://github.com/hutaobo/sfplot.git
 ```
 
 ## 功能
