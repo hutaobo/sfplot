@@ -138,12 +138,12 @@ def compute_cophenetic_distances_from_adata(
 import os
 import matplotlib.pyplot as plt
 import seaborn as sns
+import pandas as pd
 from typing import Optional
-
 
 def plot_cophenetic_heatmap(
     matrix: "pd.DataFrame",
-    matrix_name: Optional[str] = None,  # <-- 新增的参数，用于区分 row_coph 和 col_coph
+    matrix_name: Optional[str] = None,  # 用于区分 row_coph 和 col_coph
     output_dir: Optional[str] = None,
     output_filename: Optional[str] = None,
     figsize: tuple = (8, 8),
@@ -155,7 +155,8 @@ def plot_cophenetic_heatmap(
     ylabel: str = None
 ):
     """
-    对给定矩阵进行 clustermap 可视化，并修正行列 dendrogram 的位置。
+    对给定矩阵进行 clustermap 可视化，并调整行、列 dendrogram 及 color legend 的位置，
+    使得 color legend 总是位于左上角的空白区域中，且不会过大以致与 dendrogram 重叠。
 
     参数
     ----
@@ -188,24 +189,20 @@ def plot_cophenetic_heatmap(
         output_dir = os.getcwd()
     os.makedirs(output_dir, exist_ok=True)
 
-    # 根据 matrix_name 设置标题、默认文件名、以及轴标签
+    # 根据 matrix_name 设置标题、默认文件名以及轴标签
     if matrix_name == "row_coph":
         title_str = f"Searcher's D score of {sample}"
         default_filename = f"Searcher's D score_of_{sample}.pdf"
-        # 覆盖 x、y label
         xlabel = "Searcher"
         ylabel = "Searcher"
     elif matrix_name == "col_coph":
         title_str = f"Findee's D score of {sample}"
         default_filename = f"Findee's D score_of_{sample}.pdf"
-        # 覆盖 x、y label
         xlabel = "Findee"
         ylabel = "Findee"
     else:
-        # 若没提供或提供了其他名称，则沿用原先的写法（可根据需要自行调整）
         title_str = f"D score of {sample}"
         default_filename = f"D_score_of_{sample}.pdf"
-        # 若不需要覆盖，可让用户自定义或提供默认
         if xlabel is None:
             xlabel = "Findee"
         if ylabel is None:
@@ -245,20 +242,34 @@ def plot_cophenetic_heatmap(
         col_dendro_pos.height
     ])
 
-    # 6) 设置轴标签和标题
+    # 6) 调整 color legend（g.cax）位置
+    # 计算左上角的空白区域：
+    # 该区域的水平范围为：从 row dendrogram 的左边界到热图左边界；
+    # 垂直范围为：从 col dendrogram 的上边界到热图的上边界。
+    empty_left = g.ax_row_dendrogram.get_position().x0
+    empty_right = heatmap_pos.x0
+    empty_width = empty_right - empty_left
+
+    col_dendro_bbox = g.ax_col_dendrogram.get_position()
+    empty_bottom = col_dendro_bbox.y0 + col_dendro_bbox.height
+    empty_top = heatmap_pos.y0 + heatmap_pos.height
+    empty_height = empty_top - empty_bottom
+
+    # 为避免 legend 太大，取空白区域的 80% 大小，并居中放置
+    cbar_width = empty_width * 0.3
+    cbar_height = empty_height * 0.7
+    cbar_x = empty_left + (empty_width - cbar_width) / 2
+    cbar_y = empty_bottom + (empty_height - cbar_height) / 2
+
+    g.cax.set_position([cbar_x, cbar_y, cbar_width, cbar_height])
+
+    # 7) 设置轴标签和标题
     g.ax_heatmap.set_xlabel(xlabel, fontsize=12)
     g.ax_heatmap.set_ylabel(ylabel, fontsize=12)
     g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
-
-    # 设置整个图形的标题
     g.fig.suptitle(title_str, fontsize=12, y=1)
 
-    # 获取当前 color legend 的位置
-    cax_pos = g.cax.get_position()
-    # 将 color legend 的宽度和高度各缩小 20%
-    g.cax.set_position([cax_pos.x0, cax_pos.y0, cax_pos.width * 0.8, cax_pos.height * 0.6])
-
-    # 7) 保存为 PDF
+    # 8) 保存为 PDF
     if output_filename is None:
         output_filename = default_filename
     output_file = os.path.join(output_dir, output_filename)
