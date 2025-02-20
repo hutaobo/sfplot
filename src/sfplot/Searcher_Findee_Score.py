@@ -253,6 +253,11 @@ def plot_cophenetic_heatmap(
     # 设置整个图形的标题
     g.fig.suptitle(title_str, fontsize=12, y=1)
 
+    # 获取当前 color legend 的位置
+    cax_pos = g.cax.get_position()
+    # 将 color legend 的宽度和高度各缩小 20%
+    g.cax.set_position([cax_pos.x0, cax_pos.y0, cax_pos.width * 0.8, cax_pos.height * 0.6])
+
     # 7) 保存为 PDF
     if output_filename is None:
         output_filename = default_filename
