@@ -152,7 +152,8 @@ def plot_cophenetic_heatmap(
     annot: bool = False,
     sample: str = "Sample",
     xlabel: str = None,
-    ylabel: str = None
+    ylabel: str = None,
+    show_dendrogram: bool = True  # 新增参数：是否绘制 dendrogram，默认绘制
 ):
     """
     对给定矩阵进行 clustermap 可视化，并调整行、列 dendrogram 及 color legend 的位置，
@@ -182,6 +183,8 @@ def plot_cophenetic_heatmap(
         热图 X 轴标签。
     ylabel : str, optional
         热图 Y 轴标签。
+    show_dendrogram : bool, optional
+        是否绘制 dendrogram，默认 True（绘制）。如果为 False，则不绘制 dendrogram，且禁用行、列聚类。
     """
 
     # 1) 设置输出目录
@@ -208,14 +211,18 @@ def plot_cophenetic_heatmap(
         if ylabel is None:
             ylabel = "Searcher"
 
+    # 根据 show_dendrogram 参数确定是否进行聚类
+    row_cluster = show_dendrogram
+    col_cluster = show_dendrogram
+
     # 2) 生成 clustermap
     plt.figure(figsize=figsize)
     g = sns.clustermap(
         data=matrix,
         cmap=cmap,
         figsize=figsize,
-        row_cluster=True,
-        col_cluster=True,
+        row_cluster=row_cluster,
+        col_cluster=col_cluster,
         linewidths=linewidths,
         annot=annot
     )
@@ -223,45 +230,47 @@ def plot_cophenetic_heatmap(
     # 3) 设置热图单元格为正方形
     g.ax_heatmap.set_aspect("equal")
 
-    # 4) 修正行 dendrogram 与热图在 y 方向上的对齐
-    row_dendro_pos = g.ax_row_dendrogram.get_position()
-    heatmap_pos = g.ax_heatmap.get_position()
-    g.ax_row_dendrogram.set_position([
-        row_dendro_pos.x0,
-        heatmap_pos.y0,
-        row_dendro_pos.width,
-        heatmap_pos.height
-    ])
+    # 如果绘制 dendrogram，则调整 dendrogram 和 color legend 的位置
+    if show_dendrogram:
+        # 4) 修正行 dendrogram 与热图在 y 方向上的对齐
+        row_dendro_pos = g.ax_row_dendrogram.get_position()
+        heatmap_pos = g.ax_heatmap.get_position()
+        g.ax_row_dendrogram.set_position([
+            row_dendro_pos.x0,
+            heatmap_pos.y0,
+            row_dendro_pos.width,
+            heatmap_pos.height
+        ])
 
-    # 5) 修正列 dendrogram 与热图在 x 方向上的对齐
-    col_dendro_pos = g.ax_col_dendrogram.get_position()
-    g.ax_col_dendrogram.set_position([
-        heatmap_pos.x0,
-        col_dendro_pos.y0,
-        heatmap_pos.width,
-        col_dendro_pos.height
-    ])
+        # 5) 修正列 dendrogram 与热图在 x 方向上的对齐
+        col_dendro_pos = g.ax_col_dendrogram.get_position()
+        g.ax_col_dendrogram.set_position([
+            heatmap_pos.x0,
+            col_dendro_pos.y0,
+            heatmap_pos.width,
+            col_dendro_pos.height
+        ])
 
-    # 6) 调整 color legend（g.cax）位置
-    # 计算左上角的空白区域：
-    # 该区域的水平范围为：从 row dendrogram 的左边界到热图左边界；
-    # 垂直范围为：从 col dendrogram 的上边界到热图的上边界。
-    empty_left = g.ax_row_dendrogram.get_position().x0
-    empty_right = heatmap_pos.x0
-    empty_width = empty_right - empty_left
+        # 6) 调整 color legend（g.cax）位置
+        # 计算左上角的空白区域：
+        # 该区域的水平范围为：从 row dendrogram 的左边界到热图左边界；
+        # 垂直范围为：从 col dendrogram 的上边界到热图的上边界。
+        empty_left = g.ax_row_dendrogram.get_position().x0
+        empty_right = heatmap_pos.x0
+        empty_width = empty_right - empty_left
 
-    col_dendro_bbox = g.ax_col_dendrogram.get_position()
-    empty_bottom = col_dendro_bbox.y0 + col_dendro_bbox.height
-    empty_top = heatmap_pos.y0 + heatmap_pos.height
-    empty_height = empty_top - empty_bottom
+        col_dendro_bbox = g.ax_col_dendrogram.get_position()
+        empty_bottom = col_dendro_bbox.y0 + col_dendro_bbox.height
+        empty_top = heatmap_pos.y0 + heatmap_pos.height
+        empty_height = empty_top - empty_bottom
 
-    # 为避免 legend 太大，取空白区域的 80% 大小，并居中放置
-    cbar_width = empty_width * 0.3
-    cbar_height = empty_height * 0.7
-    cbar_x = empty_left + (empty_width - cbar_width) / 2
-    cbar_y = empty_bottom + (empty_height - cbar_height) / 2
+        # 为避免 legend 太大，取空白区域的 80% 大小，并居中放置
+        cbar_width = empty_width * 0.3
+        cbar_height = empty_height * 0.7
+        cbar_x = empty_left + (empty_width - cbar_width) / 2
+        cbar_y = empty_bottom + (empty_height - cbar_height) / 2
 
-    g.cax.set_position([cbar_x, cbar_y, cbar_width, cbar_height])
+        g.cax.set_position([cbar_x, cbar_y, cbar_width, cbar_height])
 
     # 7) 设置轴标签和标题
     g.ax_heatmap.set_xlabel(xlabel, fontsize=12)
