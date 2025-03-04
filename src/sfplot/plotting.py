@@ -15,7 +15,8 @@ def generate_cluster_distance_heatmap_from_path(
     base_path: str,
     sample: str,
     figsize: tuple = (8, 8),
-    output_dir: Optional[str] = None
+    output_dir: Optional[str] = None,
+    show_dendrogram: bool = True  # 新增参数：是否绘制 dendrogram，默认绘制
 ):
     """
     生成并保存每个细胞群到最近群中心的距离热图。
@@ -111,29 +112,50 @@ def generate_cluster_distance_heatmap_from_path(
         annot=False
     )
 
-    # 设置热图单元格为正方形
+    # 3) 设置热图单元格为正方形
     g.ax_heatmap.set_aspect("equal")
 
-    # 修正行 dendrogram 与热图在 y 方向上的对齐
-    # 拿到各自的 (x0, y0, width, height)
-    row_dendro_pos = g.ax_row_dendrogram.get_position()
-    heatmap_pos = g.ax_heatmap.get_position()
-    # 让行 dendrogram 的顶部和底部与热图对齐
-    g.ax_row_dendrogram.set_position([
-        row_dendro_pos.x0,
-        heatmap_pos.y0,          # 用热图的 y0
-        row_dendro_pos.width,
-        heatmap_pos.height       # 用热图的 height
-    ])
+    # 如果绘制 dendrogram，则调整 dendrogram 和 color legend 的位置
+    if show_dendrogram:
+        # 4) 修正行 dendrogram 与热图在 y 方向上的对齐
+        row_dendro_pos = g.ax_row_dendrogram.get_position()
+        heatmap_pos = g.ax_heatmap.get_position()
+        g.ax_row_dendrogram.set_position([
+            row_dendro_pos.x0,
+            heatmap_pos.y0,
+            row_dendro_pos.width,
+            heatmap_pos.height
+        ])
 
-    # 同理，修正列 dendrogram 与热图在 x 方向上的对齐（可选）
-    col_dendro_pos = g.ax_col_dendrogram.get_position()
-    g.ax_col_dendrogram.set_position([
-        heatmap_pos.x0,          # 用热图的 x0
-        col_dendro_pos.y0,
-        heatmap_pos.width,       # 用热图的 width
-        col_dendro_pos.height
-    ])
+        # 5) 修正列 dendrogram 与热图在 x 方向上的对齐
+        col_dendro_pos = g.ax_col_dendrogram.get_position()
+        g.ax_col_dendrogram.set_position([
+            heatmap_pos.x0,
+            col_dendro_pos.y0,
+            heatmap_pos.width,
+            col_dendro_pos.height
+        ])
+
+        # 6) 调整 color legend（g.cax）位置
+        # 计算左上角的空白区域：
+        # 该区域的水平范围为：从 row dendrogram 的左边界到热图左边界；
+        # 垂直范围为：从 col dendrogram 的上边界到热图的上边界。
+        empty_left = g.ax_row_dendrogram.get_position().x0
+        empty_right = heatmap_pos.x0
+        empty_width = empty_right - empty_left
+
+        col_dendro_bbox = g.ax_col_dendrogram.get_position()
+        empty_bottom = col_dendro_bbox.y0 + col_dendro_bbox.height
+        empty_top = heatmap_pos.y0 + heatmap_pos.height
+        empty_height = empty_top - empty_bottom
+
+        # 为避免 legend 太大，取空白区域的 80% 大小，并居中放置
+        cbar_width = empty_width * 0.3
+        cbar_height = empty_height * 0.7
+        cbar_x = empty_left + (empty_width - cbar_width) / 2
+        cbar_y = empty_bottom + (empty_height - cbar_height) / 2
+
+        g.cax.set_position([cbar_x, cbar_y, cbar_width, cbar_height])
 
     # 设置轴标签和标题
     g.ax_heatmap.set_xlabel("Findee", fontsize=12)
@@ -158,7 +180,8 @@ def generate_cluster_distance_heatmap_from_adata(
     output_filename: Optional[str] = None,
     figsize: tuple = (8, 8),
     cmap: str = "RdBu",
-    max_scale: float = 10
+    max_scale: float = 10,
+    show_dendrogram: bool = True  # 新增参数：是否绘制 dendrogram，默认绘制
 ):
     """
     生成并保存每个细胞群到最近群中心的距离热图。
@@ -264,29 +287,50 @@ def generate_cluster_distance_heatmap_from_adata(
         annot=False
     )
 
-    # 设置热图单元格为正方形
+    # 3) 设置热图单元格为正方形
     g.ax_heatmap.set_aspect("equal")
 
-    # 修正行 dendrogram 与热图在 y 方向上的对齐
-    # 拿到各自的 (x0, y0, width, height)
-    row_dendro_pos = g.ax_row_dendrogram.get_position()
-    heatmap_pos = g.ax_heatmap.get_position()
-    # 让行 dendrogram 的顶部和底部与热图对齐
-    g.ax_row_dendrogram.set_position([
-        row_dendro_pos.x0,
-        heatmap_pos.y0,          # 用热图的 y0
-        row_dendro_pos.width,
-        heatmap_pos.height       # 用热图的 height
-    ])
+    # 如果绘制 dendrogram，则调整 dendrogram 和 color legend 的位置
+    if show_dendrogram:
+        # 4) 修正行 dendrogram 与热图在 y 方向上的对齐
+        row_dendro_pos = g.ax_row_dendrogram.get_position()
+        heatmap_pos = g.ax_heatmap.get_position()
+        g.ax_row_dendrogram.set_position([
+            row_dendro_pos.x0,
+            heatmap_pos.y0,
+            row_dendro_pos.width,
+            heatmap_pos.height
+        ])
 
-    # 同理，修正列 dendrogram 与热图在 x 方向上的对齐（可选）
-    col_dendro_pos = g.ax_col_dendrogram.get_position()
-    g.ax_col_dendrogram.set_position([
-        heatmap_pos.x0,          # 用热图的 x0
-        col_dendro_pos.y0,
-        heatmap_pos.width,       # 用热图的 width
-        col_dendro_pos.height
-    ])
+        # 5) 修正列 dendrogram 与热图在 x 方向上的对齐
+        col_dendro_pos = g.ax_col_dendrogram.get_position()
+        g.ax_col_dendrogram.set_position([
+            heatmap_pos.x0,
+            col_dendro_pos.y0,
+            heatmap_pos.width,
+            col_dendro_pos.height
+        ])
+
+        # 6) 调整 color legend（g.cax）位置
+        # 计算左上角的空白区域：
+        # 该区域的水平范围为：从 row dendrogram 的左边界到热图左边界；
+        # 垂直范围为：从 col dendrogram 的上边界到热图的上边界。
+        empty_left = g.ax_row_dendrogram.get_position().x0
+        empty_right = heatmap_pos.x0
+        empty_width = empty_right - empty_left
+
+        col_dendro_bbox = g.ax_col_dendrogram.get_position()
+        empty_bottom = col_dendro_bbox.y0 + col_dendro_bbox.height
+        empty_top = heatmap_pos.y0 + heatmap_pos.height
+        empty_height = empty_top - empty_bottom
+
+        # 为避免 legend 太大，取空白区域的 80% 大小，并居中放置
+        cbar_width = empty_width * 0.3
+        cbar_height = empty_height * 0.7
+        cbar_x = empty_left + (empty_width - cbar_width) / 2
+        cbar_y = empty_bottom + (empty_height - cbar_height) / 2
+
+        g.cax.set_position([cbar_x, cbar_y, cbar_width, cbar_height])
 
     # 设置轴标签和标题
     g.ax_heatmap.set_xlabel("Findee", fontsize=12)
