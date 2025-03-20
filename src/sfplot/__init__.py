@@ -17,7 +17,7 @@ __all__ = [
     "load_xenium_data",
     "generate_cluster_distance_heatmap_from_adata",
     "generate_cluster_distance_heatmap_from_path",
-    "generate_cluster_distance_heatmap_from_df"
+    "generate_cluster_distance_heatmap_from_df",
     "split_B_by_distance_to_A",
     "generate_TCR_distance_heatmap_from_df",
     "compute_cophenetic_distances_from_adata",
