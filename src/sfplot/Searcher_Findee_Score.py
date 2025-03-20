@@ -133,6 +133,139 @@ def compute_cophenetic_distances_from_adata(
     return row_cophenetic_df_norm, col_cophenetic_df_norm
 
 
+import os
+import pandas as pd
+import numpy as np
+from scipy.cluster.hierarchy import linkage, cophenet
+from scipy.spatial.distance import pdist, squareform
+from sklearn.neighbors import NearestNeighbors
+from typing import Optional, Tuple
+
+def compute_cophenetic_distances_from_df(
+    df: pd.DataFrame,
+    x_col: str = 'x',
+    y_col: str = 'y',
+    celltype_col: str = 'celltype',
+    output_dir: Optional[str] = None,
+    method: str = 'average'
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    计算并返回行、列两个维度上的 cophenetic distance 矩阵，
+    并在最后将距离分别做线性归一化到 [0,1]。
+
+    参数:
+    --------
+    df : pd.DataFrame
+        包含细胞数据的 DataFrame。
+    x_col : str, optional
+        表示 x 坐标的列名。默认为 'x'。
+    y_col : str, optional
+        表示 y 坐标的列名。默认为 'y'。
+    celltype_col : str, optional
+        表示细胞类型的列名。默认为 'celltype'。
+    output_dir : Optional[str]
+        输出文件的目录。默认为当前工作目录。
+    method : str, optional
+        层次聚类中使用的链接方法。默认为 'average'。
+
+    返回值:
+    --------
+    Tuple[pd.DataFrame, pd.DataFrame]
+        返回行和列的 cophenetic distance 矩阵，均已归一化到 [0,1]。
+    """
+
+    # 0. 可选: 处理输出目录
+    if output_dir is None:
+        output_dir = os.getcwd()
+    os.makedirs(output_dir, exist_ok=True)
+
+    # 1. 检查必要的列是否存在于 DataFrame 中
+    required_columns = {x_col, y_col, celltype_col}
+    if not required_columns.issubset(df.columns):
+        raise ValueError(f"DataFrame 必须包含以下列：{required_columns}")
+
+    # 2. 提取 cluster 信息
+    clusters = df[celltype_col].astype('category')
+    unique_clusters = clusters.cat.categories
+
+    # 3. 提取空间坐标
+    coords = df[[x_col, y_col]].values  # (n_cells, 2)
+
+    # 4. 构建一个 DataFrame, 行是索引, 列是 cluster
+    df_nearest_cluster_dist = pd.DataFrame(
+        index=df.index,
+        columns=unique_clusters,
+        dtype=float
+    )
+
+    # 5. 对每个 cluster, 用最近邻模型计算所有细胞到该 cluster 最近中心的距离
+    for c in unique_clusters:
+        mask_c = (clusters == c)
+        coords_c = coords[mask_c]
+
+        if coords_c.shape[0] == 0:
+            df_nearest_cluster_dist.loc[:, c] = np.nan
+            continue
+
+        nbrs_c = NearestNeighbors(n_neighbors=1, algorithm='auto')
+        nbrs_c.fit(coords_c)
+        dist_c, _ = nbrs_c.kneighbors(coords)
+        df_nearest_cluster_dist[c] = dist_c[:, 0]
+
+    # 6. 对每个 cluster 求距离均值 => cluster x cluster 矩阵
+    df_group_mean = df_nearest_cluster_dist.groupby(clusters).mean()
+
+    # 7. 删除整列全 NaN 的 cluster
+    df_group_mean_clean = df_group_mean.dropna(axis=1, how='all')
+    if df_group_mean_clean.empty:
+        print("Warning: df_group_mean_clean is empty. 请检查数据。")
+        return pd.DataFrame(), pd.DataFrame()
+
+    # 8. 分别对行、列做层次聚类
+    row_linkage = linkage(df_group_mean_clean, method=method)
+    col_linkage = linkage(df_group_mean_clean.T, method=method)
+
+    # 9. 计算 cophenetic 距离
+    row_coph_corr, row_coph_condensed = cophenet(row_linkage, pdist(df_group_mean_clean.values))
+    col_coph_corr, col_coph_condensed = cophenet(col_linkage, pdist(df_group_mean_clean.T.values))
+
+    # 10. 将 condensed 距离转为方阵
+    row_cophenetic_square = squareform(row_coph_condensed)
+    col_cophenetic_square = squareform(col_coph_condensed)
+
+    # 11. 构建 DataFrame
+    row_labels = df_group_mean_clean.index
+    col_labels = df_group_mean_clean.columns
+
+    row_cophenetic_df = pd.DataFrame(
+        row_cophenetic_square,
+        index=row_labels,
+        columns=row_labels
+    )
+    col_cophenetic_df = pd.DataFrame(
+        col_cophenetic_square,
+        index=col_labels,
+        columns=col_labels
+    )
+
+    # 12. 分别对行、列的距离矩阵进行归一化
+    def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
+        dmin = df.values.min()
+        dmax = df.values.max()
+        if dmin == dmax:
+            return df
+        return (df - dmin) / (dmax - dmin)
+
+    row_cophenetic_df_norm = normalize_df(row_cophenetic_df)
+    col_cophenetic_df_norm = normalize_df(col_cophenetic_df)
+
+    # 打印 cophenetic correlation coefficient
+    print(f"Row cophenetic correlation coefficient: {row_coph_corr:.4f}")
+    print(f"Column cophenetic correlation coefficient: {col_coph_corr:.4f}")
+
+    return row_cophenetic_df_norm, col_cophenetic_df_norm
+
+
 # sfplot/plot_cophenetic_heatmap.py
 
 import os
