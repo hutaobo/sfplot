@@ -329,8 +329,8 @@ def plot_cophenetic_heatmap(
 
     # 根据 matrix_name 设置标题、默认文件名以及轴标签
     if matrix_name == "row_coph":
-        title_str = f"Searcher's D score of {sample}"
-        default_filename = f"Searcher's D score_of_{sample}.pdf"
+        title_str = f"StructureMap of {sample}"
+        default_filename = f"StructureMap_of_{sample}.pdf"
         xlabel = "Searcher"
         ylabel = "Searcher"
     elif matrix_name == "col_coph":
