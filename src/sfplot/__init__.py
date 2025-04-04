@@ -12,6 +12,7 @@ from .sfplot import split_B_by_distance_to_A
 from .Searcher_Findee_Score import compute_cophenetic_distances_from_adata
 from .Searcher_Findee_Score import compute_cophenetic_distances_from_df
 from .Searcher_Findee_Score import plot_cophenetic_heatmap
+from .compute_col_dendrogram_scores import compute_col_dendrogram_scores
 
 __all__ = [
     "load_xenium_data",
@@ -23,5 +24,6 @@ __all__ = [
     "compute_cophenetic_distances_from_adata",
     "compute_cophenetic_distances_from_df",
     "plot_cophenetic_heatmap",
+    "compute_col_dendrogram_scores"
     # 其他导出的函数或类
 ]
