@@ -373,6 +373,7 @@ def generate_cluster_distance_heatmap_from_df(
     x_col: str = 'x',
     y_col: str = 'y',
     celltype_col: str = 'celltype',
+    sample: str = 'Sample',
     output_dir: Optional[str] = None,
     output_filename: Optional[str] = None,
     figsize: tuple = (8, 8),
@@ -515,7 +516,7 @@ def generate_cluster_distance_heatmap_from_df(
     g.ax_heatmap.set_xlabel("Findee", fontsize=12)
     g.ax_heatmap.set_ylabel("Searcher", fontsize=12)
     g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
-    g.fig.suptitle("SFplot", fontsize=12, y=1)
+    g.fig.suptitle(f"SFplot of {sample}", fontsize=12, y=1)
 
     # 保存为 PDF
     if output_filename is None:
