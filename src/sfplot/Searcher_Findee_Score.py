@@ -275,7 +275,6 @@ Self‑contained cophenetic‑heat‑map utility.
 *  Dynamic figsize so every label is legible
 """
 
-from __future__ import annotations
 import os
 import pathlib
 from typing import Optional, Tuple
