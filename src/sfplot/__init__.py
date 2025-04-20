@@ -13,6 +13,7 @@ from .Searcher_Findee_Score import compute_cophenetic_distances_from_adata
 from .Searcher_Findee_Score import compute_cophenetic_distances_from_df
 from .Searcher_Findee_Score import plot_cophenetic_heatmap
 from .compute_col_dendrogram_scores import compute_col_dendrogram_scores
+from .tbc_analysis import transcript_by_cell_analysis
 
 __all__ = [
     "load_xenium_data",
@@ -24,6 +25,7 @@ __all__ = [
     "compute_cophenetic_distances_from_adata",
     "compute_cophenetic_distances_from_df",
     "plot_cophenetic_heatmap",
-    "compute_col_dendrogram_scores"
+    "compute_col_dendrogram_scores",
+    "transcript_by_cell_analysis"
     # 其他导出的函数或类
 ]
