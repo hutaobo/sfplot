@@ -275,32 +275,46 @@ Self‑contained cophenetic‑heat‑map utility.
 *  Dynamic figsize so every label is legible
 """
 
-import os, contextlib, logging
+import os, logging, contextlib
 from typing import Optional, Tuple
 
 import matplotlib as mpl
+import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 
-# -- keep Illustrator‑editable text (见前一版) ------------
+# Editable text in PDF
 mpl.rcParams['pdf.fonttype'] = 42
 mpl.rcParams['ps.fonttype']  = 42
-mpl.rcParams['font.family']  = 'Arial'      # 或 Liberation Sans 等
 
-# -- context manager to silence any logger ----------------
+# ------------------------------------------------------------------
+# 1) helper – temporary logger silencer
 @contextlib.contextmanager
-def silence_logger(name: str,
-                   level: int = logging.ERROR):   # 仅留下 ERROR
-    logger = logging.getLogger(name)
-    old = logger.level
-    logger.setLevel(level)
+def silence(name: str, level: int = logging.ERROR):
+    log = logging.getLogger(name)
+    old = log.level
+    log.setLevel(level)
     try:
         yield
     finally:
-        logger.setLevel(old)
+        log.setLevel(old)
 
-# ---- main plotting function -----------------------------
+# 2) helper – ensure an available sans‑serif font and avoid “Arial” if absent
+def _ensure_font():
+    want = "Arial"
+    have_arial = any(want in f.name for f in fm.fontManager.ttflist)
+    if have_arial:
+        mpl.rcParams['font.family'] = want
+        return
+    # → Fall back: Liberation Sans (metrics‑compatible with Arial)
+    fallback = "Liberation Sans"
+    if not any(fallback in f.name for f in fm.fontManager.ttflist):
+        fallback = "DejaVu Sans"      # guaranteed
+    for key in ("font.family", "font.sans-serif"):
+        mpl.rcParams[key] = [fallback]   # overwrite ANY list containing 'Arial'
+
+# ------------------------------------------------------------------
 def plot_cophenetic_heatmap(
     matrix: pd.DataFrame,
     matrix_name: Optional[str] = None,
@@ -314,26 +328,26 @@ def plot_cophenetic_heatmap(
     xlabel: Optional[str] = None,
     ylabel: Optional[str] = None,
     show_dendrogram: bool = True,
-    quiet: bool = True                    # ← 新增参数
+    quiet: bool = True,
 ):
-    # ---------- dynamic figsize （参考上版实现） ----------
-    if figsize is None:
-        rows, cols = matrix.shape
-        figsize = (max(8, 0.25 * cols + 2.5),
-                   max(8, 0.25 * rows + 2.5))
+    # ---- pick font first (removes Arial if missing) ----------------
+    _ensure_font()
 
-    # ---------- output path & title -----------------------
+    # ---- dynamic figsize so labels always fit ----------------------
+    if figsize is None:
+        r, c = matrix.shape
+        figsize = (max(8, 0.25 * c + 2.5), max(8, 0.25 * r + 2.5))
+
+    # ---- I/O -------------------------------------------------------
     if output_dir is None:
         output_dir = os.getcwd()
     os.makedirs(output_dir, exist_ok=True)
 
     title_map = {
         "row_coph": (f"StructureMap of {sample}",
-                     f"StructureMap_of_{sample}.pdf",
-                     "Searcher", "Searcher"),
-        "col_coph": (f"Findee's D score of {sample}",
-                     f"Findee_D_score_of_{sample}.pdf",
-                     "Findee", "Findee"),
+                     f"StructureMap_of_{sample}.pdf", "Searcher", "Searcher"),
+        "col_coph": (f"Findee's D score of {sample}",
+                     f"Findee_D_score_of_{sample}.pdf", "Findee", "Findee"),
     }
     title, default_pdf, xlab, ylab = title_map.get(
         matrix_name,
@@ -343,29 +357,28 @@ def plot_cophenetic_heatmap(
     xlabel, ylabel = xlabel or xlab, ylabel or ylab
     pdf_path = os.path.join(output_dir, output_filename or default_pdf)
 
-    # ---------- plotting ---------------------------------
+    # ---- plot inside two “quiet” contexts --------------------------
     def _draw():
         g = sns.clustermap(
             data        = matrix,
-            cmap        = cmap,
             figsize     = figsize,
+            cmap        = cmap,
             row_cluster = show_dendrogram,
             col_cluster = show_dendrogram,
             linewidths  = linewidths,
-            annot       = annot
+            annot       = annot,
         )
         g.ax_heatmap.set_aspect("equal")
         g.ax_heatmap.set_xlabel(xlabel, fontsize=12)
         g.ax_heatmap.set_ylabel(ylabel, fontsize=12)
-        g.ax_heatmap.set_yticklabels(
-            g.ax_heatmap.get_yticklabels(), rotation=0)
+        g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
         g.fig.suptitle(title, fontsize=12, y=1.02)
         plt.savefig(pdf_path, format="pdf", bbox_inches="tight")
         plt.close()
 
-    # ---------- silence fontTools if requested ------------
     if quiet:
-        with silence_logger('fontTools.subset', logging.ERROR):
+        with silence("fontTools.subset", logging.ERROR), \
+             silence("matplotlib.font_manager", logging.ERROR):
             _draw()
     else:
         _draw()
