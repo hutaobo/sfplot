@@ -266,8 +266,6 @@ def compute_cophenetic_distances_from_df(
 
 
 # ---------------- plot_cophenetic_heatmap.py ----------------
-from __future__ import annotations
-
 import os
 import contextlib
 import logging
