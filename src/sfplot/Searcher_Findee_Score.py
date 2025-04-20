@@ -265,17 +265,12 @@ def compute_cophenetic_distances_from_df(
     return row_cophenetic_df_norm, col_cophenetic_df_norm
 
 
-# sfplot/plot_cophenetic_heatmap.py
+# ---------------- plot_cophenetic_heatmap.py ----------------
+from __future__ import annotations
 
-"""
-Self‑contained cophenetic‑heat‑map utility.
-
-*  Editable text in Illustrator (Type‑42 embedding)
-*  Tries local Arial TrueType first; otherwise falls back to Liberation Sans
-*  Dynamic figsize so every label is legible
-"""
-
-import os, logging, contextlib
+import os
+import contextlib
+import logging
 from typing import Optional, Tuple
 
 import matplotlib as mpl
@@ -284,37 +279,39 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 
-# Editable text in PDF
-mpl.rcParams['pdf.fonttype'] = 42
-mpl.rcParams['ps.fonttype']  = 42
+# ---------- 1. 让 PDF 中的文字可编辑 ----------
+mpl.rcParams["pdf.fonttype"] = 42
+mpl.rcParams["ps.fonttype"] = 42
 
-# ------------------------------------------------------------------
-# 1) helper – temporary logger silencer
+# ---------- 2. 小工具：静音任意 logger ----------
 @contextlib.contextmanager
-def silence(name: str, level: int = logging.ERROR):
-    log = logging.getLogger(name)
-    old = log.level
-    log.setLevel(level)
+def silence(logger_name: str, level: int = logging.ERROR):
+    """Temporarily raise the logging level of *logger_name*."""
+    logger = logging.getLogger(logger_name)
+    old_level = logger.level
+    logger.setLevel(level)
     try:
         yield
     finally:
-        log.setLevel(old)
+        logger.setLevel(old_level)
 
-# 2) helper – ensure an available sans‑serif font and avoid “Arial” if absent
+
+# ---------- 3. 保证存在合法 sans‑serif 字体 ----------
 def _ensure_font():
+    """Use Arial if present; otherwise switch to Liberation Sans / DejaVu Sans."""
     want = "Arial"
-    have_arial = any(want in f.name for f in fm.fontManager.ttflist)
-    if have_arial:
-        mpl.rcParams['font.family'] = want
+    if any(want in f.name for f in fm.fontManager.ttflist):
+        mpl.rcParams["font.family"] = want
         return
-    # → Fall back: Liberation Sans (metrics‑compatible with Arial)
     fallback = "Liberation Sans"
     if not any(fallback in f.name for f in fm.fontManager.ttflist):
-        fallback = "DejaVu Sans"      # guaranteed
-    for key in ("font.family", "font.sans-serif"):
-        mpl.rcParams[key] = [fallback]   # overwrite ANY list containing 'Arial'
+        fallback = "DejaVu Sans"
+    # 覆盖 font.family 与 font.sans-serif 列表，移除 Arial
+    mpl.rcParams["font.family"] = [fallback]
+    mpl.rcParams["font.sans-serif"] = [fallback]
 
-# ------------------------------------------------------------------
+
+# ---------- 4. 核心函数 ----------
 def plot_cophenetic_heatmap(
     matrix: pd.DataFrame,
     matrix_name: Optional[str] = None,
@@ -330,55 +327,107 @@ def plot_cophenetic_heatmap(
     show_dendrogram: bool = True,
     quiet: bool = True,
 ):
-    # ---- pick font first (removes Arial if missing) ----------------
+    """
+    绘制 cophenetic heatmap（seaborn.clustermap），并保证：
+      • PDF 文字可编辑
+      • 自动调整 legend 位置
+      • 动态调整 figsize
+      • 静默 fontTools.subset & findfont 日志
+    """
+    # ---- 保证有可用字体，避免 findfont 警告 ----
     _ensure_font()
 
-    # ---- dynamic figsize so labels always fit ----------------------
+    # ---- 动态 figsize ----
     if figsize is None:
-        r, c = matrix.shape
-        figsize = (max(8, 0.25 * c + 2.5), max(8, 0.25 * r + 2.5))
+        rows, cols = matrix.shape
+        figsize = (max(8.0, 0.25 * cols + 0.5), max(8.0, 0.25 * rows + 0.5))
 
-    # ---- I/O -------------------------------------------------------
+    # ---- 输出路径 & 标题 ----
     if output_dir is None:
         output_dir = os.getcwd()
     os.makedirs(output_dir, exist_ok=True)
 
     title_map = {
-        "row_coph": (f"StructureMap of {sample}",
-                     f"StructureMap_of_{sample}.pdf", "Searcher", "Searcher"),
-        "col_coph": (f"Findee's D score of {sample}",
-                     f"Findee_D_score_of_{sample}.pdf", "Findee", "Findee"),
+        "row_coph": (
+            f"StructureMap of {sample}",
+            f"StructureMap_of_{sample}.pdf",
+            "Searcher",
+            "Searcher",
+        ),
+        "col_coph": (
+            f"Findee's D score of {sample}",
+            f"Findee_D_score_of_{sample}.pdf",
+            "Findee",
+            "Findee",
+        ),
     }
     title, default_pdf, xlab, ylab = title_map.get(
         matrix_name,
-        (f"D score of {sample}", f"D_score_of_{sample}.pdf",
-         xlabel or "Findee", ylabel or "Searcher")
+        (
+            f"D score of {sample}",
+            f"D_score_of_{sample}.pdf",
+            xlabel or "Findee",
+            ylabel or "Searcher",
+        ),
     )
     xlabel, ylabel = xlabel or xlab, ylabel or ylab
     pdf_path = os.path.join(output_dir, output_filename or default_pdf)
 
-    # ---- plot inside two “quiet” contexts --------------------------
+    # ---- 内部绘图函数 ----
     def _draw():
         g = sns.clustermap(
-            data        = matrix,
-            figsize     = figsize,
-            cmap        = cmap,
-            row_cluster = show_dendrogram,
-            col_cluster = show_dendrogram,
-            linewidths  = linewidths,
-            annot       = annot,
+            data=matrix,
+            figsize=figsize,
+            cmap=cmap,
+            row_cluster=show_dendrogram,
+            col_cluster=show_dendrogram,
+            linewidths=linewidths,
+            annot=annot,
         )
+
+        # 1) 保证热图方格是正方形
         g.ax_heatmap.set_aspect("equal")
+
+        # 2) 调整 dendrogram & color‑bar 位置
+        if show_dendrogram:
+            heat = g.ax_heatmap.get_position()
+            row_d = g.ax_row_dendrogram.get_position()
+            col_d = g.ax_col_dendrogram.get_position()
+
+            # 2‑1 行 dendrogram 垂直对齐
+            g.ax_row_dendrogram.set_position(
+                [row_d.x0, heat.y0, row_d.width, heat.height]
+            )
+            # 2‑2 列 dendrogram 水平对齐
+            g.ax_col_dendrogram.set_position(
+                [heat.x0, col_d.y0, heat.width, col_d.height]
+            )
+            # 2‑3 color‑bar 放进左上角空白区域
+            empty_w = heat.x0 - row_d.x0
+            empty_h = (heat.y0 + heat.height) - (col_d.y0 + col_d.height)
+            g.cax.set_position(
+                [
+                    row_d.x0 + empty_w * 0.35,
+                    col_d.y0 + col_d.height + empty_h * 0.15,
+                    empty_w * 0.30,
+                    empty_h * 0.70,
+                ]
+            )
+
+        # 3) 轴标签 & 标题
         g.ax_heatmap.set_xlabel(xlabel, fontsize=12)
         g.ax_heatmap.set_ylabel(ylabel, fontsize=12)
         g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
         g.fig.suptitle(title, fontsize=12, y=1.02)
+
         plt.savefig(pdf_path, format="pdf", bbox_inches="tight")
         plt.close()
 
+    # ---- 执行绘图（可静音日志）----
     if quiet:
-        with silence("fontTools.subset", logging.ERROR), \
-             silence("matplotlib.font_manager", logging.ERROR):
+        with silence("fontTools.subset", logging.ERROR), silence(
+            "matplotlib.font_manager", logging.ERROR
+        ):
             _draw()
     else:
         _draw()
