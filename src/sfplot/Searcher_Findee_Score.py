@@ -267,154 +267,159 @@ def compute_cophenetic_distances_from_df(
 
 # sfplot/plot_cophenetic_heatmap.py
 
+"""
+Self‑contained cophenetic‑heat‑map utility.
+
+*  Editable text in Illustrator (Type‑42 embedding)
+*  Tries local Arial TrueType first; otherwise falls back to Liberation Sans
+*  Dynamic figsize so every label is legible
+"""
+
+from __future__ import annotations
 import os
+import pathlib
+from typing import Optional, Tuple
+
+import matplotlib as mpl
+import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 import seaborn as sns
+import numpy as np
 import pandas as pd
-from typing import Optional
 
+# ---------------------------------------------------------------------
+#                       FONT / PDF SETTINGS
+# ---------------------------------------------------------------------
+mpl.rcParams['pdf.fonttype'] = 42        # embed TrueType, keep text editable
+mpl.rcParams['ps.fonttype']  = 42
+
+# -- 1) Try to register a local Arial TTF shipped with the project -----
+_CANDIDATES = ['arial.ttf', 'Arial.ttf', 'ARIAL.TTF']
+_SEARCH_DIRS = [
+    pathlib.Path.cwd(),
+    pathlib.Path.cwd() / "fonts"
+]
+_font_found = None
+for d in _SEARCH_DIRS:
+    for name in _CANDIDATES:
+        p = d / name
+        if p.is_file():
+            fm.fontManager.addfont(str(p))
+            _font_found = "Arial"
+            break
+    if _font_found:
+        break
+
+# -- 2) Decide which default family to use ----------------------------
+if _font_found == "Arial":
+    mpl.rcParams['font.family'] = 'Arial'
+else:
+    # Liberation Sans is metrically compatible with Arial, falls back cleanly
+    if any("Liberation Sans" in f.name for f in fm.fontManager.ttflist):
+        mpl.rcParams['font.family'] = 'Liberation Sans'
+        _font_found = "Liberation Sans"
+    else:
+        mpl.rcParams['font.family'] = 'DejaVu Sans'   # guaranteed to exist
+        _font_found = "DejaVu Sans"
+
+print(f"[heatmap_fontsafe] Using font family: {_font_found}")
+
+# ---------------------------------------------------------------------
+#            HEURISTIC FOR FIGURE SIZE WHEN USER LEAVES IT BLANK
+# ---------------------------------------------------------------------
+_CELL_W, _CELL_H   = 0.30, 0.30   # inches per matrix cell
+_MARGINS           = dict(left=2.0, right=0.5, top=0.5, bottom=2.0)
+
+def _auto_figsize(mat: pd.DataFrame) -> Tuple[float, float]:
+    rows, cols = mat.shape
+    w = _MARGINS['left'] + cols * _CELL_W + _MARGINS['right']
+    h = _MARGINS['bottom'] + rows * _CELL_H + _MARGINS['top']
+    return max(w, 4.0), max(h, 4.0)          # never smaller than 4×4 in
+
+# ---------------------------------------------------------------------
+#                  MAIN PLOTTING FUNCTION
+# ---------------------------------------------------------------------
 def plot_cophenetic_heatmap(
-    matrix: "pd.DataFrame",
-    matrix_name: Optional[str] = None,  # 用于区分 row_coph 和 col_coph
+    matrix: pd.DataFrame,
+    matrix_name: Optional[str] = None,
     output_dir: Optional[str] = None,
     output_filename: Optional[str] = None,
-    figsize: tuple = (8, 8),
+    figsize: Optional[Tuple[float, float]] = None,
     cmap: str = "RdBu",
     linewidths: float = 0.5,
     annot: bool = False,
     sample: str = "Sample",
-    xlabel: str = None,
-    ylabel: str = None,
-    show_dendrogram: bool = True  # 新增参数：是否绘制 dendrogram，默认绘制
+    xlabel: Optional[str] = None,
+    ylabel: Optional[str] = None,
+    show_dendrogram: bool = True
 ):
-    """
-    对给定矩阵进行 clustermap 可视化，并调整行、列 dendrogram 及 color legend 的位置，
-    使得 color legend 总是位于左上角的空白区域中，且不会过大以致与 dendrogram 重叠。
-
-    参数
-    ----
-    matrix : pd.DataFrame
-        待可视化的距离或相似度矩阵 (可为对称矩阵)。
-    matrix_name : str, optional
-        矩阵的名称，用于区分是 "row_coph" 还是 "col_coph"。
-    output_dir : str, optional
-        保存输出文件的目录。若为 None，使用当前工作目录。
-    output_filename : str, optional
-        保存输出文件名。若为 None，则根据 matrix_name 和 sample 决定。
-    figsize : tuple, optional
-        图像大小，默认 (8,8)。
-    cmap : str, optional
-        颜色映射，默认 "RdBu"。
-    linewidths : float, optional
-        热图单元格之间的间隔线宽，默认 0.5。
-    annot : bool, optional
-        是否在格子中显示数值，默认 False。
-    sample : str, optional
-        用于设置图形标题中的样本名称，默认 "Sample"。
-    xlabel : str, optional
-        热图 X 轴标签。
-    ylabel : str, optional
-        热图 Y 轴标签。
-    show_dendrogram : bool, optional
-        是否绘制 dendrogram，默认 True（绘制）。如果为 False，则不绘制 dendrogram，且禁用行、列聚类。
-    """
-
-    # 1) 设置输出目录
+    """Draw a Seaborn clustermap with Illustrator‑friendly fonts."""
+    # -- paths ---------------------------------------------------------
     if output_dir is None:
         output_dir = os.getcwd()
     os.makedirs(output_dir, exist_ok=True)
 
-    # 根据 matrix_name 设置标题、默认文件名以及轴标签
+    # -- labels / titles ----------------------------------------------
     if matrix_name == "row_coph":
-        title_str = f"StructureMap of {sample}"
-        default_filename = f"StructureMap_of_{sample}.pdf"
-        xlabel = "Searcher"
-        ylabel = "Searcher"
+        title       = f"StructureMap of {sample}"
+        default_pdf = f"StructureMap_of_{sample}.pdf"
+        xlabel, ylabel = "Searcher", "Searcher"
     elif matrix_name == "col_coph":
-        title_str = f"Findee's D score of {sample}"
-        default_filename = f"Findee's D score_of_{sample}.pdf"
-        xlabel = "Findee"
-        ylabel = "Findee"
+        title       = f"Findee's D score of {sample}"
+        default_pdf = f"Findee_D_score_of_{sample}.pdf"
+        xlabel, ylabel = "Findee", "Findee"
     else:
-        title_str = f"D score of {sample}"
-        default_filename = f"D_score_of_{sample}.pdf"
-        if xlabel is None:
-            xlabel = "Findee"
-        if ylabel is None:
-            ylabel = "Searcher"
+        title       = f"D score of {sample}"
+        default_pdf = f"D_score_of_{sample}.pdf"
+        xlabel = xlabel or "Findee"
+        ylabel = ylabel or "Searcher"
 
-    # 根据 show_dendrogram 参数确定是否进行聚类
-    row_cluster = show_dendrogram
-    col_cluster = show_dendrogram
+    # -- dynamic figsize ----------------------------------------------
+    if figsize is None:
+        figsize = _auto_figsize(matrix)
 
-    # 2) 生成 clustermap
-    plt.figure(figsize=figsize)
+    # -- draw heat‑map -------------------------------------------------
     g = sns.clustermap(
-        data=matrix,
-        cmap=cmap,
-        figsize=figsize,
-        row_cluster=row_cluster,
-        col_cluster=col_cluster,
-        linewidths=linewidths,
-        annot=annot
+        data        = matrix,
+        figsize     = figsize,
+        cmap        = cmap,
+        row_cluster = show_dendrogram,
+        col_cluster = show_dendrogram,
+        linewidths  = linewidths,
+        annot       = annot
     )
-
-    # 3) 设置热图单元格为正方形
     g.ax_heatmap.set_aspect("equal")
 
-    # 如果绘制 dendrogram，则调整 dendrogram 和 color legend 的位置
+    # -- align dendrograms & colour bar --------------------------------
     if show_dendrogram:
-        # 4) 修正行 dendrogram 与热图在 y 方向上的对齐
-        row_dendro_pos = g.ax_row_dendrogram.get_position()
-        heatmap_pos = g.ax_heatmap.get_position()
-        g.ax_row_dendrogram.set_position([
-            row_dendro_pos.x0,
-            heatmap_pos.y0,
-            row_dendro_pos.width,
-            heatmap_pos.height
+        heat = g.ax_heatmap.get_position()
+        row  = g.ax_row_dendrogram.get_position()
+        col  = g.ax_col_dendrogram.get_position()
+
+        g.ax_row_dendrogram.set_position(
+            [row.x0, heat.y0, row.width, heat.height])
+        g.ax_col_dendrogram.set_position(
+            [heat.x0, col.y0, heat.width, col.height])
+
+        # place colour‑bar in empty top‑left corner
+        empty_w = heat.x0 - row.x0
+        empty_h = (heat.y0 + heat.height) - (col.y0 + col.height)
+        g.cax.set_position([
+            row.x0 + empty_w * 0.35,
+            col.y0 + col.height + empty_h * 0.15,
+            empty_w * 0.30,
+            empty_h * 0.70
         ])
 
-        # 5) 修正列 dendrogram 与热图在 x 方向上的对齐
-        col_dendro_pos = g.ax_col_dendrogram.get_position()
-        g.ax_col_dendrogram.set_position([
-            heatmap_pos.x0,
-            col_dendro_pos.y0,
-            heatmap_pos.width,
-            col_dendro_pos.height
-        ])
-
-        # 6) 调整 color legend（g.cax）位置
-        # 计算左上角的空白区域：
-        # 该区域的水平范围为：从 row dendrogram 的左边界到热图左边界；
-        # 垂直范围为：从 col dendrogram 的上边界到热图的上边界。
-        empty_left = g.ax_row_dendrogram.get_position().x0
-        empty_right = heatmap_pos.x0
-        empty_width = empty_right - empty_left
-
-        col_dendro_bbox = g.ax_col_dendrogram.get_position()
-        empty_bottom = col_dendro_bbox.y0 + col_dendro_bbox.height
-        empty_top = heatmap_pos.y0 + heatmap_pos.height
-        empty_height = empty_top - empty_bottom
-
-        # 为避免 legend 太大，取空白区域的 80% 大小，并居中放置
-        cbar_width = empty_width * 0.3
-        cbar_height = empty_height * 0.7
-        cbar_x = empty_left + (empty_width - cbar_width) / 2
-        cbar_y = empty_bottom + (empty_height - cbar_height) / 2
-
-        g.cax.set_position([cbar_x, cbar_y, cbar_width, cbar_height])
-
-    # 7) 设置轴标签和标题
+    # -- labels --------------------------------------------------------
     g.ax_heatmap.set_xlabel(xlabel, fontsize=12)
     g.ax_heatmap.set_ylabel(ylabel, fontsize=12)
     g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
-    g.fig.suptitle(title_str, fontsize=12, y=1)
+    g.fig.suptitle(title, fontsize=12, y=1.02)
 
-    # 8) 保存为 PDF
-    if output_filename is None:
-        output_filename = default_filename
-    output_file = os.path.join(output_dir, output_filename)
-    plt.savefig(output_file, format="pdf", bbox_inches="tight")
+    # -- save ----------------------------------------------------------
+    pdf_name = output_filename or default_pdf
+    path = os.path.join(output_dir, pdf_name)
+    plt.savefig(path, format="pdf", bbox_inches="tight")
     plt.close()
-
-    print(f"Heatmap saved to: {output_file}")
+    print(f"Heat‑map saved to: {path}")
