@@ -212,6 +212,7 @@ def transcript_by_cell_analysis(
         output_dir=output_folder,
         output_filename=f"StructureMap_of_{sample_name}.pdf",
     )
+    _row_coph_global.to_csv(f"{output_folder}/StructureMap_table_{sample_name}.csv")
 
     # 7) 并行逐基因 cophenetic，按行流式写 CSV ----------------------------------
     genes = list(adata.var.index)
