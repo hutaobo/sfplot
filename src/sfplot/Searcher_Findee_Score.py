@@ -275,69 +275,32 @@ Self‑contained cophenetic‑heat‑map utility.
 *  Dynamic figsize so every label is legible
 """
 
-import os
-import pathlib
+import os, contextlib, logging
 from typing import Optional, Tuple
 
 import matplotlib as mpl
-import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 import seaborn as sns
-import numpy as np
 import pandas as pd
 
-# ---------------------------------------------------------------------
-#                       FONT / PDF SETTINGS
-# ---------------------------------------------------------------------
-mpl.rcParams['pdf.fonttype'] = 42        # embed TrueType, keep text editable
+# -- keep Illustrator‑editable text (见前一版) ------------
+mpl.rcParams['pdf.fonttype'] = 42
 mpl.rcParams['ps.fonttype']  = 42
+mpl.rcParams['font.family']  = 'Arial'      # 或 Liberation Sans 等
 
-# -- 1) Try to register a local Arial TTF shipped with the project -----
-_CANDIDATES = ['arial.ttf', 'Arial.ttf', 'ARIAL.TTF']
-_SEARCH_DIRS = [
-    pathlib.Path.cwd(),
-    pathlib.Path.cwd() / "fonts"
-]
-_font_found = None
-for d in _SEARCH_DIRS:
-    for name in _CANDIDATES:
-        p = d / name
-        if p.is_file():
-            fm.fontManager.addfont(str(p))
-            _font_found = "Arial"
-            break
-    if _font_found:
-        break
+# -- context manager to silence any logger ----------------
+@contextlib.contextmanager
+def silence_logger(name: str,
+                   level: int = logging.ERROR):   # 仅留下 ERROR
+    logger = logging.getLogger(name)
+    old = logger.level
+    logger.setLevel(level)
+    try:
+        yield
+    finally:
+        logger.setLevel(old)
 
-# -- 2) Decide which default family to use ----------------------------
-if _font_found == "Arial":
-    mpl.rcParams['font.family'] = 'Arial'
-else:
-    # Liberation Sans is metrically compatible with Arial, falls back cleanly
-    if any("Liberation Sans" in f.name for f in fm.fontManager.ttflist):
-        mpl.rcParams['font.family'] = 'Liberation Sans'
-        _font_found = "Liberation Sans"
-    else:
-        mpl.rcParams['font.family'] = 'DejaVu Sans'   # guaranteed to exist
-        _font_found = "DejaVu Sans"
-
-print(f"[heatmap_fontsafe] Using font family: {_font_found}")
-
-# ---------------------------------------------------------------------
-#            HEURISTIC FOR FIGURE SIZE WHEN USER LEAVES IT BLANK
-# ---------------------------------------------------------------------
-_CELL_W, _CELL_H   = 0.30, 0.30   # inches per matrix cell
-_MARGINS           = dict(left=2.0, right=0.5, top=0.5, bottom=2.0)
-
-def _auto_figsize(mat: pd.DataFrame) -> Tuple[float, float]:
-    rows, cols = mat.shape
-    w = _MARGINS['left'] + cols * _CELL_W + _MARGINS['right']
-    h = _MARGINS['bottom'] + rows * _CELL_H + _MARGINS['top']
-    return max(w, 4.0), max(h, 4.0)          # never smaller than 4×4 in
-
-# ---------------------------------------------------------------------
-#                  MAIN PLOTTING FUNCTION
-# ---------------------------------------------------------------------
+# ---- main plotting function -----------------------------
 def plot_cophenetic_heatmap(
     matrix: pd.DataFrame,
     matrix_name: Optional[str] = None,
@@ -350,75 +313,61 @@ def plot_cophenetic_heatmap(
     sample: str = "Sample",
     xlabel: Optional[str] = None,
     ylabel: Optional[str] = None,
-    show_dendrogram: bool = True
+    show_dendrogram: bool = True,
+    quiet: bool = True                    # ← 新增参数
 ):
-    """Draw a Seaborn clustermap with Illustrator‑friendly fonts."""
-    # -- paths ---------------------------------------------------------
+    # ---------- dynamic figsize （参考上版实现） ----------
+    if figsize is None:
+        rows, cols = matrix.shape
+        figsize = (max(8, 0.25 * cols + 2.5),
+                   max(8, 0.25 * rows + 2.5))
+
+    # ---------- output path & title -----------------------
     if output_dir is None:
         output_dir = os.getcwd()
     os.makedirs(output_dir, exist_ok=True)
 
-    # -- labels / titles ----------------------------------------------
-    if matrix_name == "row_coph":
-        title       = f"StructureMap of {sample}"
-        default_pdf = f"StructureMap_of_{sample}.pdf"
-        xlabel, ylabel = "Searcher", "Searcher"
-    elif matrix_name == "col_coph":
-        title       = f"Findee's D score of {sample}"
-        default_pdf = f"Findee_D_score_of_{sample}.pdf"
-        xlabel, ylabel = "Findee", "Findee"
-    else:
-        title       = f"D score of {sample}"
-        default_pdf = f"D_score_of_{sample}.pdf"
-        xlabel = xlabel or "Findee"
-        ylabel = ylabel or "Searcher"
-
-    # -- dynamic figsize ----------------------------------------------
-    if figsize is None:
-        figsize = _auto_figsize(matrix)
-
-    # -- draw heat‑map -------------------------------------------------
-    g = sns.clustermap(
-        data        = matrix,
-        figsize     = figsize,
-        cmap        = cmap,
-        row_cluster = show_dendrogram,
-        col_cluster = show_dendrogram,
-        linewidths  = linewidths,
-        annot       = annot
+    title_map = {
+        "row_coph": (f"StructureMap of {sample}",
+                     f"StructureMap_of_{sample}.pdf",
+                     "Searcher", "Searcher"),
+        "col_coph": (f"Findee's D score of {sample}",
+                     f"Findee_D_score_of_{sample}.pdf",
+                     "Findee", "Findee"),
+    }
+    title, default_pdf, xlab, ylab = title_map.get(
+        matrix_name,
+        (f"D score of {sample}", f"D_score_of_{sample}.pdf",
+         xlabel or "Findee", ylabel or "Searcher")
     )
-    g.ax_heatmap.set_aspect("equal")
+    xlabel, ylabel = xlabel or xlab, ylabel or ylab
+    pdf_path = os.path.join(output_dir, output_filename or default_pdf)
 
-    # -- align dendrograms & colour bar --------------------------------
-    if show_dendrogram:
-        heat = g.ax_heatmap.get_position()
-        row  = g.ax_row_dendrogram.get_position()
-        col  = g.ax_col_dendrogram.get_position()
+    # ---------- plotting ---------------------------------
+    def _draw():
+        g = sns.clustermap(
+            data        = matrix,
+            cmap        = cmap,
+            figsize     = figsize,
+            row_cluster = show_dendrogram,
+            col_cluster = show_dendrogram,
+            linewidths  = linewidths,
+            annot       = annot
+        )
+        g.ax_heatmap.set_aspect("equal")
+        g.ax_heatmap.set_xlabel(xlabel, fontsize=12)
+        g.ax_heatmap.set_ylabel(ylabel, fontsize=12)
+        g.ax_heatmap.set_yticklabels(
+            g.ax_heatmap.get_yticklabels(), rotation=0)
+        g.fig.suptitle(title, fontsize=12, y=1.02)
+        plt.savefig(pdf_path, format="pdf", bbox_inches="tight")
+        plt.close()
 
-        g.ax_row_dendrogram.set_position(
-            [row.x0, heat.y0, row.width, heat.height])
-        g.ax_col_dendrogram.set_position(
-            [heat.x0, col.y0, heat.width, col.height])
+    # ---------- silence fontTools if requested ------------
+    if quiet:
+        with silence_logger('fontTools.subset', logging.ERROR):
+            _draw()
+    else:
+        _draw()
 
-        # place colour‑bar in empty top‑left corner
-        empty_w = heat.x0 - row.x0
-        empty_h = (heat.y0 + heat.height) - (col.y0 + col.height)
-        g.cax.set_position([
-            row.x0 + empty_w * 0.35,
-            col.y0 + col.height + empty_h * 0.15,
-            empty_w * 0.30,
-            empty_h * 0.70
-        ])
-
-    # -- labels --------------------------------------------------------
-    g.ax_heatmap.set_xlabel(xlabel, fontsize=12)
-    g.ax_heatmap.set_ylabel(ylabel, fontsize=12)
-    g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
-    g.fig.suptitle(title, fontsize=12, y=1.02)
-
-    # -- save ----------------------------------------------------------
-    pdf_name = output_filename or default_pdf
-    path = os.path.join(output_dir, pdf_name)
-    plt.savefig(path, format="pdf", bbox_inches="tight")
-    plt.close()
-    print(f"Heat‑map saved to: {path}")
+    print(f"Heat‑map saved to: {pdf_path}")
