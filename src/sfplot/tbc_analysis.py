@@ -58,7 +58,7 @@ def _init_worker(shm_name, shm_shape, shm_dtype,
         arr, columns=["x", "y", "feature_name"]
     )
     _coords_global["feature_name"] = _coords_global["feature_name"].astype(str)
-    _coords_global.set_flags(write=False)   # just for safety
+    _coords_global.flags.writeable = False   # just for safety
 
     # 3) small globals sent via pickle
     _adata_obs       = adata_obs_df
