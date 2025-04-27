@@ -148,21 +148,25 @@ def compute_cophenetic_distances_from_df(
     df: pd.DataFrame,
     x_col: str = "x",
     y_col: str = "y",
+    z_col: Optional[str] = None,
     celltype_col: str = "celltype",
     output_dir: Optional[str] = None,
     method: str = "average",
-    show_corr: bool = False,           # 新增参数，控制是否打印 cophenetic 相关系数
+    show_corr: bool = False,           # 控制是否打印 cophenetic 相关系数
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     计算并返回行、列两个维度上的 cophenetic distance 矩阵，
-    并在最后将距离分别线性归一化到 [0, 1]。
+    并在最后将距离分别线性归一化到 [0, 1]。
+
+    如果提供 z_col，则在计算距离时使用 (x, y, z)，
+    否则仅使用 (x, y)。
 
     参数
     ----
     df : pd.DataFrame
         包含细胞数据的 DataFrame。
-    x_col, y_col : str, optional
-        表示空间坐标的列名。
+    x_col, y_col, z_col : str, optional
+        表示空间坐标的列名。其中 z_col 默认为 None。
     celltype_col : str, optional
         表示细胞类型的列名。
     output_dir : Optional[str]
@@ -176,7 +180,7 @@ def compute_cophenetic_distances_from_df(
     返回值
     ------
     Tuple[pd.DataFrame, pd.DataFrame]
-        行和列的 cophenetic 距离矩阵，均已归一化到 [0, 1]。
+        行和列的 cophenetic 距离矩阵，均已归一化到 [0, 1]。
     """
     # 0. 处理输出目录
     if output_dir is None:
@@ -185,6 +189,8 @@ def compute_cophenetic_distances_from_df(
 
     # 1. 检查必需列
     required_columns = {x_col, y_col, celltype_col}
+    if z_col is not None:
+        required_columns.add(z_col)
     if not required_columns.issubset(df.columns):
         raise ValueError(f"DataFrame 必须包含以下列：{required_columns}")
 
@@ -192,12 +198,15 @@ def compute_cophenetic_distances_from_df(
     clusters = df[celltype_col].astype("category")
     unique_clusters = clusters.cat.categories
 
-    # 3. 提取空间坐标
-    coords = df[[x_col, y_col]].values  # (n_cells, 2)
+    # 3. 提取空间坐标 (n_cells, dims)
+    coord_cols = [x_col, y_col] + ([z_col] if z_col is not None else [])
+    coords = df[coord_cols].values
 
     # 4. 初始化最近距离矩阵 (cell x cluster)
     df_nearest_cluster_dist = pd.DataFrame(
-        index=df.index, columns=unique_clusters, dtype=float
+        index=df.index,
+        columns=unique_clusters,
+        dtype=float
     )
 
     # 5. 计算每个细胞到各 cluster 最近中心的距离
@@ -226,7 +235,7 @@ def compute_cophenetic_distances_from_df(
     row_linkage = linkage(df_group_mean_clean, method=method)
     col_linkage = linkage(df_group_mean_clean.T, method=method)
 
-    # 9. 计算 cophenetic 距离
+    # 9. 计算 cophenetic 距离及相关系数
     row_coph_corr, row_coph_condensed = cophenet(
         row_linkage, pdist(df_group_mean_clean.values)
     )
@@ -234,7 +243,7 @@ def compute_cophenetic_distances_from_df(
         col_linkage, pdist(df_group_mean_clean.T.values)
     )
 
-    # 10. condensed → 方阵
+    # 10. 将 condensed 转为方阵
     row_cophenetic_square = squareform(row_coph_condensed)
     col_cophenetic_square = squareform(col_coph_condensed)
 
@@ -249,7 +258,7 @@ def compute_cophenetic_distances_from_df(
         col_cophenetic_square, index=col_labels, columns=col_labels
     )
 
-    # 12. 归一化
+    # 12. 归一化函数
     def normalize_df(mat: pd.DataFrame) -> pd.DataFrame:
         dmin, dmax = mat.values.min(), mat.values.max()
         return mat if dmin == dmax else (mat - dmin) / (dmax - dmin)
@@ -257,7 +266,7 @@ def compute_cophenetic_distances_from_df(
     row_cophenetic_df_norm = normalize_df(row_cophenetic_df)
     col_cophenetic_df_norm = normalize_df(col_cophenetic_df)
 
-    # 13. 可选打印
+    # 13. 可选打印相关系数
     if show_corr:
         print(f"Row cophenetic correlation coefficient: {row_coph_corr:.4f}")
         print(f"Column cophenetic correlation coefficient: {col_coph_corr:.4f}")
