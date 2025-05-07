@@ -1,10 +1,11 @@
 import os
+from typing import Optional
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.neighbors import NearestNeighbors
-from typing import Optional
 
 
 def generate_TCR_distance_heatmap_from_df(

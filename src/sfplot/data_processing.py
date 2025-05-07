@@ -1,8 +1,9 @@
 import os
 import tarfile
+
+import h5py
 import pandas as pd
 import scanpy as sc
-import h5py
 from spatialdata_io import xenium
 
 

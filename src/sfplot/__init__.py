@@ -3,18 +3,18 @@
 __author__ = """Taobo Hu"""
 __email__ = 'taobo.hu@scilifelab.se'
 
+from .Searcher_Findee_Score import compute_cophenetic_distances_from_adata
+from .Searcher_Findee_Score import compute_cophenetic_distances_from_df
+from .Searcher_Findee_Score import plot_cophenetic_heatmap
+from .TCR_distance_heatmap import generate_TCR_distance_heatmap_from_df
 from .circle_heatmap import circle_heatmap
 from .compute_col_dendrogram_scores import compute_col_dendrogram_scores
 from .data_processing import load_xenium_data
 from .plotting import generate_cluster_distance_heatmap_from_adata
-from .plotting import generate_cluster_distance_heatmap_from_path
 from .plotting import generate_cluster_distance_heatmap_from_df
+from .plotting import generate_cluster_distance_heatmap_from_path
 from .sfplot import split_B_by_distance_to_A
-from .Searcher_Findee_Score import compute_cophenetic_distances_from_adata
-from .Searcher_Findee_Score import compute_cophenetic_distances_from_df
-from .Searcher_Findee_Score import plot_cophenetic_heatmap
 from .tbc_analysis import transcript_by_cell_analysis
-from .TCR_distance_heatmap import generate_TCR_distance_heatmap_from_df
 
 __all__ = [
     "circle_heatmap",

@@ -1,12 +1,13 @@
 # sfplot/compute_cophenetic_distances_from_adata.py
 
 import os
+from typing import Optional, Tuple
+
 import numpy as np
 import pandas as pd
-from typing import Optional, Tuple
-from sklearn.neighbors import NearestNeighbors
 from scipy.cluster.hierarchy import linkage, cophenet
 from scipy.spatial.distance import squareform, pdist
+from sklearn.neighbors import NearestNeighbors
 
 
 def compute_cophenetic_distances_from_adata(

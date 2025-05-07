@@ -2,12 +2,14 @@
 
 import tkinter as tk
 from tkinter import filedialog, messagebox
+
 import pandas as pd
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from sfplot import (
     compute_cophenetic_distances_from_df,
     plot_cophenetic_heatmap,
 )
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
 
 def main():
     root = tk.Tk()

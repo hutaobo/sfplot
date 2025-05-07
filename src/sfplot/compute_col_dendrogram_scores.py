@@ -1,10 +1,11 @@
 import os
 from typing import Optional, Union
+
 import numpy as np
 import pandas as pd
-from sklearn.neighbors import NearestNeighbors
-from scipy.spatial.distance import pdist, squareform
 from scipy.cluster.hierarchy import linkage, to_tree
+from scipy.spatial.distance import pdist, squareform
+from sklearn.neighbors import NearestNeighbors
 
 
 def compute_col_dendrogram_scores(

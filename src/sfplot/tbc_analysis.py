@@ -8,20 +8,24 @@ tbc_analysis.py  ——  多进程、共享内存、省内存版
 """
 
 from __future__ import annotations
-import os, gc, logging, traceback, warnings
+
+import gc
+import logging
+import os
+import traceback
+import warnings
 from multiprocessing import Pool, shared_memory
 from typing import Optional
 
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
-
 from sfplot import (
     load_xenium_data,
     compute_cophenetic_distances_from_df,
     plot_cophenetic_heatmap,
 )
 from spatialdata_io import xenium
+from tqdm import tqdm
 
 # ─── Logging & Warnings ──────────────────────────────────────────────
 logging.basicConfig(

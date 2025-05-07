@@ -1,7 +1,8 @@
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
+
 
 def circle_heatmap(bg_df: pd.DataFrame,
                    circle_df: pd.DataFrame,

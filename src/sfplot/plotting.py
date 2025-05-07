@@ -1,12 +1,13 @@
 # sfplot/plotting.py
 
 import os
+from typing import Optional
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.neighbors import NearestNeighbors
-from typing import Optional
 
 from .data_processing import load_xenium_data  # 确保这个导入路径正确
 

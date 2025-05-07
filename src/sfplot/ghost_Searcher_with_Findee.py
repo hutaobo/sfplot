@@ -1,7 +1,8 @@
-import pandas as pd
 import numpy as np
-from sklearn.neighbors import NearestNeighbors
+import pandas as pd
 from joblib import Parallel, delayed
+from sklearn.neighbors import NearestNeighbors
+
 
 def compute_groupwise_average_distance_between_two_dfs(
     df1: pd.DataFrame,

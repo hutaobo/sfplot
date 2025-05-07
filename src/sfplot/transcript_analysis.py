@@ -1,6 +1,7 @@
 import pandas as pd
-from tqdm import tqdm
 from joblib import Parallel, delayed
+from tqdm import tqdm
+
 
 def process_gene(gene, adata, transcripts_pdf):
     df_obs = adata.obs[['x', 'y', 'celltype']]
