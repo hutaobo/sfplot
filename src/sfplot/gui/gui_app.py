@@ -1,29 +1,62 @@
 # src/sfplot/gui/gui_app.py
 
 import tkinter as tk
-from sfplot.plotting import plot_xyz  # 或你包里其它绘图函数
+from tkinter import filedialog, messagebox
+import pandas as pd
+from sfplot import (
+    compute_cophenetic_distances_from_df,
+    plot_cophenetic_heatmap,
+)
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 def main():
-    # 1. 创建窗口
     root = tk.Tk()
-    root.title("SFPlot 绘图工具")
-    root.geometry("600x400")
+    root.title("SFPlot Cophenetic Heatmap")
+    root.geometry("800x600")
 
-    # 2. 按钮：点击生成图表
-    btn = tk.Button(
-        root,
-        text="生成图表",
-        font=("Arial", 14),
-        width=20,
-        height=2,
-        command=plot_xyz  # 直接调用你的绘图函数
-    )
-    btn.pack(pady=50)
+    def load_and_plot():
+        path = filedialog.askopenfilename(
+            title="选择CSV文件",
+            filetypes=[("CSV 文件", "*.csv")]
+        )  # 打开文件对话框:contentReference[oaicite:7]{index=7}
+        if not path:
+            return
+        try:
+            df = pd.read_csv(path)  # 读取 CSV:contentReference[oaicite:8]{index=8}
+        except Exception as e:
+            messagebox.showerror("错误", f"无法读取文件：\n{e}")
+            return
 
-    # 3. 启动事件循环
+        # 计算 Cophenetic 距离矩阵
+        row_coph, col_coph = compute_cophenetic_distances_from_df(
+            df,
+            x_col="xc",
+            y_col="yc",
+            celltype_col="target",
+            output_dir=None,
+        )
+
+        # 生成热图 Figure
+        fig = plot_cophenetic_heatmap(
+            matrix=row_coph,
+            matrix_name="row_coph",
+            sample="Tonsil",
+        )
+
+        # 如果之前已经有图表，则清除
+        for widget in root.pack_slaves():
+            if isinstance(widget, tk.Canvas):
+                widget.destroy()
+
+        # 将 Matplotlib Figure 嵌入到 Tkinter 窗口中:contentReference[oaicite:9]{index=9}
+        canvas = FigureCanvasTkAgg(fig, master=root)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    btn = tk.Button(root, text="选择 CSV 并绘图", command=load_and_plot)
+    btn.pack(pady=10)
+
     root.mainloop()
 
-
-# 允许直接 python -m 调用
 if __name__ == "__main__":
     main()
