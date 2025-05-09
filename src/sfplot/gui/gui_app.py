@@ -1,6 +1,6 @@
 # src/sfplot/gui/gui_app.py
 
-"""SFPlot Cophenetic Heatmap GUI — 支持 PDF 嵌入和鼠标滚轮/滚动条"""
+"""SFPlot Cophenetic Heatmap GUI — 直接使用 matplotlib 图形"""
 
 from __future__ import annotations
 import queue
@@ -12,14 +12,15 @@ import tkinter as tk
 from tkinter import END, filedialog, messagebox, ttk
 
 import matplotlib
+
 # 使用 TkAgg 后端
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg  # noqa: E402
 import pandas as pd  # noqa: E402
 
-# PDF 转图片
-from pdf2image import convert_from_path  # noqa: E402
+# 不再需要 PDF 转图片
+# from pdf2image import convert_from_path  # noqa: E402
 from PIL import Image, ImageTk  # noqa: E402
 
 from sfplot import compute_cophenetic_distances_from_df, plot_cophenetic_heatmap  # noqa: E402
@@ -29,12 +30,14 @@ _EXEC_DIR = Path(sys.argv[0]).resolve().parent
 _LOG_FILE = _EXEC_DIR / "cellgps_error.log"
 _LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
 
+
 def _write_error(msg: str) -> None:
     with _LOG_FILE.open("a", encoding="utf-8") as f:
         f.write(msg + "\n---\n")
 
+
 class MainApp(tk.Tk):
-    """主窗口：后台线程 + 可滚动 Canvas + 鼠标滚轮"""
+    """主窗口：后台线程 + Matplotlib 画布"""
     _STEPS = {"start": 0, "csv_read": 10, "calc_dist": 50, "plot": 90, "done": 100}
 
     def __init__(self) -> None:
@@ -60,24 +63,12 @@ class MainApp(tk.Tk):
         self.log_text = tk.Text(log_frame, width=30, state="disabled")
         self.log_text.pack(fill="both", expand=True)
 
-        # 可滚动绘图区
-        display_frame = tk.LabelFrame(self, text="绘图区域")
-        display_frame.pack(side="right", fill="both", expand=True, padx=5, pady=5)
-        display_frame.rowconfigure(0, weight=1)
-        display_frame.columnconfigure(0, weight=1)
-        self._scroll_canvas = tk.Canvas(display_frame)
-        self._scroll_canvas.grid(row=0, column=0, sticky="nsew")
-        self._hbar = ttk.Scrollbar(display_frame, orient="horizontal", command=self._scroll_canvas.xview)
-        self._hbar.grid(row=1, column=0, sticky="ew")
-        self._vbar = ttk.Scrollbar(display_frame, orient="vertical", command=self._scroll_canvas.yview)
-        self._vbar.grid(row=0, column=1, sticky="ns")
-        self._scroll_canvas.configure(xscrollcommand=self._hbar.set, yscrollcommand=self._vbar.set)
+        # 绘图区
+        self.display_frame = tk.LabelFrame(self, text="绘图区域")
+        self.display_frame.pack(side="right", fill="both", expand=True, padx=5, pady=5)
 
-        # 当前图像引用
-        self._photo = None  # type: ImageTk.PhotoImage
-
-        # 绑定滚动
-        self.bind_scroll()
+        # 当前画布引用
+        self._figure_canvas = None
 
         # 启动队列
         self.after(100, self._poll_queue)
@@ -112,26 +103,28 @@ class MainApp(tk.Tk):
             df = pd.read_csv(csv_path)
             self._queue.put(("progress", self._STEPS["csv_read"]))
 
-            self._queue.put(("log", "调用 plot_cophenetic_heatmap 绘图并生成 PDF…"))
+            self._queue.put(("log", "计算距离矩阵..."))
             row_df, _ = compute_cophenetic_distances_from_df(
                 df, x_col="xc", y_col="yc", celltype_col="target", output_dir=None
             )
-            pdf_path = _EXEC_DIR / "StructureMap.pdf"
-            plot_cophenetic_heatmap(
+            self._queue.put(("progress", self._STEPS["calc_dist"]))
+
+            self._queue.put(("log", "生成热图..."))
+            # 使用 return_figure=True 直接获取图形对象
+            cluster_grid = plot_cophenetic_heatmap(
                 row_df,
-                output_filename=str(pdf_path),
                 matrix_name="row_coph",
                 sample="",
+                return_figure=True,  # 使用新参数
             )
-            self._queue.put(("progress", self._STEPS["plot"]))
-            self._queue.put(("log", f"PDF 已保存: {pdf_path}"))
 
-            self._queue.put(("log", "PDF 转图片…"))
-            pages = convert_from_path(str(pdf_path), dpi=200, first_page=1, last_page=1)
-            img = pages[0]
+            self._queue.put(("progress", self._STEPS["plot"]))
+            self._queue.put(("log", "热图生成完成"))
+
+            # 发送图形对象到主线程显示
+            self._queue.put(("figure", cluster_grid))
             self._queue.put(("progress", self._STEPS["done"]))
-            self._queue.put(("log", "完成，准备展示…"))
-            self._queue.put(("image", img))
+
         except Exception as e:
             err_msg = f"后台错误: {e}\n{traceback.format_exc()}"
             _write_error(err_msg)
@@ -149,8 +142,8 @@ class MainApp(tk.Tk):
                     val = int(payload)
                     self._progress.configure(value=val)
                     self._progress_label.configure(text=f"{val}%")
-                elif tag == "image":
-                    self._embed_image(payload)
+                elif tag == "figure":
+                    self._embed_figure(payload)
                 elif tag == "error":
                     messagebox.showerror("错误", payload)
                 elif tag == "done":
@@ -160,32 +153,25 @@ class MainApp(tk.Tk):
         finally:
             self.after(100, self._poll_queue)
 
-    def _embed_image(self, pil_img: Image.Image) -> None:
-        # 清理 Canvas
-        self._scroll_canvas.delete("all")
-        # 转 PhotoImage
-        self._photo = ImageTk.PhotoImage(pil_img)
-        # 放置图像
-        self._scroll_canvas.create_image(0, 0, image=self._photo, anchor="nw")
-        # 更新 scrollregion
-        self._scroll_canvas.configure(scrollregion=self._scroll_canvas.bbox("all"))
+    def _embed_figure(self, cluster_grid):
+        """将 matplotlib 图形嵌入到界面"""
+        # 如果已有旧画布，先清除
+        if self._figure_canvas is not None:
+            self._figure_canvas.get_tk_widget().destroy()
 
-    def _on_mousewheel(self, event):
-        self._scroll_canvas.yview_scroll(-1 * int(event.delta / 120), "units")
+        # 创建新画布，并嵌入图形
+        self._figure_canvas = FigureCanvasTkAgg(cluster_grid.fig, master=self.display_frame)
+        self._figure_canvas.draw()
 
-    def _on_shift_mousewheel(self, event):
-        self._scroll_canvas.xview_scroll(-1 * int(event.delta / 120), "units")
-
-    def bind_scroll(self) -> None:
-        self._scroll_canvas.bind_all("<MouseWheel>", self._on_mousewheel)
-        self._scroll_canvas.bind_all("<Shift-MouseWheel>", self._on_shift_mousewheel)
-        self._scroll_canvas.bind_all("<Button-4>", lambda e: self._scroll_canvas.yview_scroll(-1, "units"))
-        self._scroll_canvas.bind_all("<Button-5>", lambda e: self._scroll_canvas.yview_scroll(1, "units"))
+        # 添加到界面
+        canvas_widget = self._figure_canvas.get_tk_widget()
+        canvas_widget.pack(fill="both", expand=True)
 
 
 def main() -> None:
     app = MainApp()
     app.mainloop()
+
 
 if __name__ == "__main__":
     main()
