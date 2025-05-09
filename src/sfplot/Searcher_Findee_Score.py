@@ -334,6 +334,7 @@ def plot_cophenetic_heatmap(
     ylabel: Optional[str] = None,
     show_dendrogram: bool = True,
     quiet: bool = True,
+    return_figure: bool = False,
 ):
     """
     绘制 cophenetic heatmap（seaborn.clustermap），并保证：
@@ -341,6 +342,14 @@ def plot_cophenetic_heatmap(
       • 自动调整 legend 位置
       • 动态调整 figsize
       • 静默 fontTools.subset & findfont 日志
+
+    参数:
+      ...现有参数...
+      return_figure: 是否返回图形对象而不是保存到文件
+
+    返回值:
+      如果 return_figure=True，返回 seaborn.ClusterGrid 对象
+      否则返回 None
     """
     # ---- 保证有可用字体，避免 findfont 警告 ----
     _ensure_font()
@@ -351,9 +360,10 @@ def plot_cophenetic_heatmap(
         figsize = (max(8.0, 0.25 * cols + 0.5), max(8.0, 0.25 * rows + 0.5))
 
     # ---- 输出路径 & 标题 ----
-    if output_dir is None:
-        output_dir = os.getcwd()
-    os.makedirs(output_dir, exist_ok=True)
+    if not return_figure:  # 只有在需要保存文件时才处理路径
+        if output_dir is None:
+            output_dir = os.getcwd()
+        os.makedirs(output_dir, exist_ok=True)
 
     title_map = {
         "row_coph": (
@@ -379,7 +389,10 @@ def plot_cophenetic_heatmap(
         ),
     )
     xlabel, ylabel = xlabel or xlab, ylabel or ylab
-    pdf_path = os.path.join(output_dir, output_filename or default_pdf)
+
+    # 只在需要保存文件时设置路径
+    if not return_figure:
+        pdf_path = os.path.join(output_dir, output_filename or default_pdf)
 
     # ---- 内部绘图函数 ----
     def _draw():
@@ -428,16 +441,26 @@ def plot_cophenetic_heatmap(
         g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
         g.fig.suptitle(title, fontsize=12, y=1.02)
 
-        plt.savefig(pdf_path, format="pdf", bbox_inches="tight")
-        plt.close()
+        # 如果不需要返回图形，则保存文件并关闭
+        if not return_figure:
+            plt.savefig(pdf_path, format="pdf", bbox_inches="tight")
+            plt.close()
+
+        # 返回 ClusterGrid 对象
+        return g
 
     # ---- 执行绘图（可静音日志）----
     if quiet:
         with silence("fontTools.subset", logging.ERROR), silence(
             "matplotlib.font_manager", logging.ERROR
         ):
-            _draw()
+            g = _draw()
     else:
-        _draw()
+        g = _draw()
 
-    print(f"Heat‑map saved to: {pdf_path}")
+    # 如果需要保存文件，打印消息
+    if not return_figure:
+        print(f"Heat‑map saved to: {pdf_path}")
+        return None
+    else:
+        return g
