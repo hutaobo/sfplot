@@ -335,6 +335,8 @@ def plot_cophenetic_heatmap(
     show_dendrogram: bool = True,
     quiet: bool = True,
     return_figure: bool = False,
+    return_image: bool = False,
+    dpi: int = 300,  # 图像 DPI，影响图像质量
 ):
     """
     绘制 cophenetic heatmap（seaborn.clustermap），并保证：
@@ -346,11 +348,18 @@ def plot_cophenetic_heatmap(
     参数:
       ...现有参数...
       return_figure: 是否返回图形对象而不是保存到文件
+      return_image: 是否返回高清 PIL 图像而不是图形对象
+      dpi: 图像的 DPI 分辨率，仅当 return_image=True 时有效
 
     返回值:
       如果 return_figure=True，返回 seaborn.ClusterGrid 对象
+      如果 return_image=True，返回 PIL.Image 图像对象
       否则返回 None
     """
+    # 当同时指定两种返回方式时，优先返回图像
+    if return_image:
+        return_figure = False
+
     # ---- 保证有可用字体，避免 findfont 警告 ----
     _ensure_font()
 
@@ -360,7 +369,7 @@ def plot_cophenetic_heatmap(
         figsize = (max(8.0, 0.25 * cols + 0.5), max(8.0, 0.25 * rows + 0.5))
 
     # ---- 输出路径 & 标题 ----
-    if not return_figure:  # 只有在需要保存文件时才处理路径
+    if not (return_figure or return_image):  # 只有在需要保存文件时才处理路径
         if output_dir is None:
             output_dir = os.getcwd()
         os.makedirs(output_dir, exist_ok=True)
@@ -391,7 +400,7 @@ def plot_cophenetic_heatmap(
     xlabel, ylabel = xlabel or xlab, ylabel or ylab
 
     # 只在需要保存文件时设置路径
-    if not return_figure:
+    if not (return_figure or return_image):
         pdf_path = os.path.join(output_dir, output_filename or default_pdf)
 
     # ---- 内部绘图函数 ----
@@ -441,10 +450,28 @@ def plot_cophenetic_heatmap(
         g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
         g.fig.suptitle(title, fontsize=12, y=1.02)
 
-        # 如果不需要返回图形，则保存文件并关闭
-        if not return_figure:
+        # 根据返回类型处理图形
+        if return_image:
+            # 将图形转为高清图像
+            from io import BytesIO
+            from PIL import Image
+
+            # 创建内存缓冲区用于保存图像
+            buf = BytesIO()
+            g.fig.savefig(buf, format='png', dpi=dpi, bbox_inches='tight')
+            buf.seek(0)
+
+            # 加载为 PIL 图像
+            image = Image.open(buf)
+            image_copy = image.copy()  # 创建副本以便关闭原图
+            buf.close()
+            plt.close(g.fig)  # 关闭图形避免内存泄漏
+
+            return image_copy
+        elif not return_figure:
             plt.savefig(pdf_path, format="pdf", bbox_inches="tight")
-            plt.close()
+            plt.close(g.fig)
+            return None
 
         # 返回 ClusterGrid 对象
         return g
@@ -454,13 +481,12 @@ def plot_cophenetic_heatmap(
         with silence("fontTools.subset", logging.ERROR), silence(
             "matplotlib.font_manager", logging.ERROR
         ):
-            g = _draw()
+            result = _draw()
     else:
-        g = _draw()
+        result = _draw()
 
-    # 如果需要保存文件，打印消息
-    if not return_figure:
+    # 如果保存文件，打印消息
+    if not (return_figure or return_image):
         print(f"Heat‑map saved to: {pdf_path}")
-        return None
-    else:
-        return g
+
+    return result
