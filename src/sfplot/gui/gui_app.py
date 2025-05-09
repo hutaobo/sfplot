@@ -1,10 +1,13 @@
 # src/sfplot/gui/gui_app.py
 
 import os
+import sys
+import traceback
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import pandas as pd
 import matplotlib
+
 # 为了和 TkAgg 配合，先设置后端
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -15,11 +18,22 @@ from sfplot import (
     plot_cophenetic_heatmap,
 )
 
+# 设置日志目录
+log_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+log_file = os.path.join(log_dir, 'cellgps_error.log')
+
+# 确保日志目录存在
+os.makedirs(os.path.dirname(log_file), exist_ok=True)
+
+
 class MainApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("SFPlot Cophenetic Heatmap")
         self.geometry("900x700")
+
+        # 添加全局异常处理
+        self.report_callback_exception = self.handle_exception
 
         # ——— 按钮区 —————————————————————
         btn_frame = tk.Frame(self)
@@ -44,12 +58,30 @@ class MainApp(tk.Tk):
         # 当前画布引用
         self.canvas = None
 
+        # 记录初始化完成
+        self.log("程序启动成功")
+
+    def handle_exception(self, exc_type, exc_value, exc_traceback):
+        """处理未捕获的异常"""
+        error_msg = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+        self.log(f"错误: {error_msg}")
+
+        # 写入日志文件
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{error_msg}\n---\n")
+
+        # 显示错误对话框
+        messagebox.showerror("程序错误", f"发生错误:\n{exc_value}\n\n详细信息已记录到日志")
+
     def log(self, msg: str):
         """在日志区追加一行文本"""
         self.log_text.config(state="normal")
         self.log_text.insert(tk.END, msg + "\n")
         self.log_text.see(tk.END)
         self.log_text.config(state="disabled")
+
+        # 同时输出到控制台
+        print(msg)
 
     def load_and_plot(self):
         """读取 CSV 并调用 sfplot 画图，最后嵌入到界面"""
@@ -75,9 +107,9 @@ class MainApp(tk.Tk):
 
         # 3) 屏蔽 plt.savefig/plt.close（内部调用时不实际写磁盘或关窗口）
         _orig_savefig = plt.savefig
-        _orig_close  = plt.close
+        _orig_close = plt.close
         plt.savefig = lambda *args, **kwargs: None
-        plt.close   = lambda *args, **kwargs: None
+        plt.close = lambda *args, **kwargs: None
 
         # 4) 计算并绘图
         try:
@@ -98,11 +130,12 @@ class MainApp(tk.Tk):
         except Exception as e:
             messagebox.showerror("错误", f"绘图过程中出错：\n{e}")
             self.log(f">> 绘图失败：{e}")
+            return
         finally:
             # 恢复原函数
             fig = plt.gcf()
             plt.savefig = _orig_savefig
-            plt.close   = _orig_close
+            plt.close = _orig_close
 
         # 5) 嵌入或更新画布
         self.log(">> 嵌入结果到界面 …")
@@ -120,9 +153,25 @@ class MainApp(tk.Tk):
         w = self.canvas.get_tk_widget()
         w.pack(fill="both", expand=True)
 
+
 def main():
     app = MainApp()
     app.mainloop()
 
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        error_msg = f"程序启动失败: {str(e)}\n{traceback.format_exc()}"
+        # 写入错误日志
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{error_msg}\n---\n")
+        # 显示错误
+        print(error_msg)
+        # 弹出错误对话框
+        import tkinter.messagebox as mb
+
+        mb.showerror("启动错误", f"程序启动失败:\n{str(e)}\n\n详细信息已写入日志: {log_file}")
+        # 等待用户确认，防止控制台闪退
+        input("按回车键退出...")
