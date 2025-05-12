@@ -1,7 +1,3 @@
-# src/sfplot/gui/gui_app.py
-
-"""SFPlot Cophenetic Heatmap GUI — supports high-resolution images and mouse wheel/scrollbars"""
-
 from __future__ import annotations
 import queue
 import sys
@@ -11,187 +7,222 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import END, filedialog, messagebox, ttk
 
-import matplotlib
+import pandas as pd
+from PIL import Image, ImageTk
 
-# use the TkAgg backend
-matplotlib.use("TkAgg")
-import matplotlib.pyplot as plt  # noqa: E402
-import pandas as pd  # noqa: E402
-from PIL import Image, ImageTk  # noqa: E402
-
-from sfplot import compute_cophenetic_distances_from_df, plot_cophenetic_heatmap  # noqa: E402
-
-# log file
-_EXEC_DIR = Path(sys.argv[0]).resolve().parent
-_LOG_FILE = _EXEC_DIR / "cellgps_error.log"
-_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+# SFPlot imports
+from sfplot import (
+    compute_cophenetic_distances_from_df,
+    plot_cophenetic_heatmap,
+    load_xenium_data,
+    compute_cophenetic_distances_from_adata,
+)
 
 
-def _write_error(msg: str) -> None:
-    with _LOG_FILE.open("a", encoding="utf-8") as f:
-        f.write(msg + "\n---\n")
+def resource_path(relative_path: str) -> str:
+    """
+    Helper to get absolute path, if needed (e.g., when bundling with PyInstaller).
+    """
+    try:
+        base_path = sys._MEIPASS  # type: ignore
+    except Exception:
+        base_path = Path(__file__).parent
+    return str(Path(base_path) / relative_path)
 
 
 class MainApp(tk.Tk):
-    """Main window: background thread + scrollable Canvas + mouse wheel support"""
-    _STEPS = {"start": 0, "csv_read": 10, "calc_dist": 50, "plot": 90, "done": 100}
-
     def __init__(self) -> None:
         super().__init__()
-        self.title("CellGPS")
-        self.geometry("900x700")
-        self.report_callback_exception = self._handle_exception
+        self.title("CellGPS GUI")
+        self.geometry("1000x750")
+
+        # Shared queue for thread communication
         self._queue: queue.Queue[tuple[str, object]] = queue.Queue()
+        self._STEPS = {
+            "start": 5,
+            "csv_read": 20,
+            "calc_dist": 60,
+            "plot": 90,
+            "done": 100,
+        }
 
-        # top toolbar
-        top = tk.Frame(self)
+        # Notebook (tabs)
+        self.notebook = ttk.Notebook(self)
+        self.notebook.pack(fill="both", expand=True)
+
+        # --- Tab 1: CSV Heatmap ---
+        self.tab_csv = tk.Frame(self.notebook)
+        self.notebook.add(self.tab_csv, text="CSV Heatmap")
+        self._build_csv_tab()
+
+        # --- Tab 2: Xenium Heatmap ---
+        self.tab_xenium = tk.Frame(self.notebook)
+        self.notebook.add(self.tab_xenium, text="Xenium Heatmap")
+        self._build_xenium_tab()
+
+        # Start polling queue
+        self.after(100, self._poll_queue)
+        self._log_csv("Program started successfully")
+
+    def _build_csv_tab(self) -> None:
+        # Top controls
+        top = tk.Frame(self.tab_csv)
         top.pack(fill="x", padx=5, pady=5)
-
-        # Select CSV button
-        self.load_btn = tk.Button(top, text="Select CSV", command=self._ask_file)
+        self.load_btn = tk.Button(top, text="Select CSV File", command=self._ask_csv_file)
         self.load_btn.pack(side="left")
-
-        # X: label and combobox
-        self.x_label = tk.Label(top, text="X:")
-        self.x_label.pack(side="left", padx=(10, 0))
-        self.x_col_cb = ttk.Combobox(top, state="disabled")
-        self.x_col_cb.pack(side="left", padx=5)
-
-        # Y: label and combobox
-        self.y_label = tk.Label(top, text="Y:")
-        self.y_label.pack(side="left", padx=(10, 0))
-        self.y_col_cb = ttk.Combobox(top, state="disabled")
-        self.y_col_cb.pack(side="left", padx=5)
-
-        # Cell Type: label and combobox
-        self.cell_label = tk.Label(top, text="Cell Type:")
-        self.cell_label.pack(side="left", padx=(10, 0))
-        self.cell_col_cb = ttk.Combobox(top, state="disabled")
-        self.cell_col_cb.pack(side="left", padx=5)
-
-        # Plot Heatmap button
-        self.draw_btn = tk.Button(top, text="Plot Heatmap", state="disabled", command=self._start_worker)
+        self.draw_btn = tk.Button(top, text="Plot CSV Heatmap", state="disabled", command=self._start_csv_worker)
         self.draw_btn.pack(side="left", padx=5)
-
-        # Progress bar
         self._progress = ttk.Progressbar(top, mode="determinate", length=200, maximum=100)
         self._progress.pack(side="left", padx=10)
         self._progress_label = tk.Label(top, text="0%")
         self._progress_label.pack(side="left")
 
-        # Running Log
-        log_frame = tk.LabelFrame(self, text="Running Log")
+        # Display area
+        self.display_frame = tk.LabelFrame(self.tab_csv, text="Display Area")
+        self.display_frame.pack(side="right", fill="both", expand=True, padx=5, pady=5)
+
+        # Log area
+        log_frame = tk.LabelFrame(self.tab_csv, text="Running Log")
         log_frame.pack(side="left", fill="y", padx=5, pady=5)
         self.log_text = tk.Text(log_frame, width=30, state="disabled")
         self.log_text.pack(fill="both", expand=True)
 
-        # Display Area
-        self.display_frame = tk.LabelFrame(self, text="Display Area")
-        self.display_frame.pack(side="right", fill="both", expand=True, padx=5, pady=5)
+        # State
+        self.csv_path: str | None = None
+        self._photo: ImageTk.PhotoImage | None = None
+        self._scroll_canvas: tk.Canvas | None = None
+        self._image_frame: tk.Frame | None = None
 
-        # image references
-        self._photo = None  # type: ImageTk.PhotoImage | None
-        self._scroll_canvas = None  # type: tk.Canvas | None
-        self._image_frame = None  # type: tk.Frame | None
-        self.df: pd.DataFrame | None = None
+    def _build_xenium_tab(self) -> None:
+        # Top controls
+        top2 = tk.Frame(self.tab_xenium)
+        top2.pack(fill="x", padx=5, pady=5)
+        self.xenium_btn = tk.Button(top2, text="Select Xenium Dir", command=self._ask_xenium_dir)
+        self.xenium_btn.pack(side="left")
+        self.selcsv_btn = tk.Button(top2, text="Select Selection CSV", command=self._ask_selection_csv)
+        self.selcsv_btn.pack(side="left", padx=5)
+        self.plot_x_btn = tk.Button(top2, text="Plot Xenium Heatmap", state="disabled", command=self._start_xenium_worker)
+        self.plot_x_btn.pack(side="left", padx=5)
+        self._progress2 = ttk.Progressbar(top2, mode="determinate", length=200, maximum=100)
+        self._progress2.pack(side="left", padx=10)
+        self._prog_label2 = tk.Label(top2, text="0%")
+        self._prog_label2.pack(side="left")
 
-        # start polling
-        self.after(100, self._poll_queue)
-        self._log("Program started successfully")
+        # Display area
+        self.display_frame2 = tk.LabelFrame(self.tab_xenium, text="Display Area")
+        self.display_frame2.pack(side="right", fill="both", expand=True, padx=5, pady=5)
 
-    def _log(self, msg: str) -> None:
-        self.log_text.configure(state="normal")
-        self.log_text.insert(END, msg + "\n")
-        self.log_text.see(END)
-        self.log_text.configure(state="disabled")
-        print(msg)
+        # Log area
+        log_frame2 = tk.LabelFrame(self.tab_xenium, text="Running Log")
+        log_frame2.pack(side="left", fill="y", padx=5, pady=5)
+        self.log_text2 = tk.Text(log_frame2, width=30, state="disabled")
+        self.log_text2.pack(fill="both", expand=True)
 
-    def _handle_exception(self, exc_type, exc_value, exc_traceback):
-        err = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-        _write_error(err)
-        self._log(f"Error: {exc_value}")
-        messagebox.showerror("Error", f"An error occurred:\n{exc_value}\n\nLogged to: {_LOG_FILE}")
+        # State
+        self.xenium_path: str | None = None
+        self.selection_csv: str | None = None
+        self._photo2: ImageTk.PhotoImage | None = None
+        self._scroll_canvas2: tk.Canvas | None = None
+        self._image_frame2: tk.Frame | None = None
 
-    def _ask_file(self) -> None:
-        self._log(">> Opening file…")
+    # -------- CSV Tab Callbacks --------
+    def _ask_csv_file(self) -> None:
         path = filedialog.askopenfilename(title="Select CSV File", filetypes=[("CSV", "*.csv")])
         if not path:
-            self._log(">> Cancelled.")
             return
-        self._log(f"Reading CSV: {Path(path).name}")
-        try:
-            df = pd.read_csv(path)
-        except Exception as e:
-            messagebox.showerror("Read Error", f"Failed to read file: {e}")
-            return
-        self.df = df
-        cols = list(df.columns)
-        for cb in (self.x_col_cb, self.y_col_cb, self.cell_col_cb):
-            cb.configure(values=cols, state="readonly")
-            cb.set("")
-        # defaults
-        if "xc" in cols:
-            self.x_col_cb.set("xc")
-        elif "x" in cols:
-            self.x_col_cb.set("x")
-        if "yc" in cols:
-            self.y_col_cb.set("yc")
-        elif "y" in cols:
-            self.y_col_cb.set("y")
-        if "target" in cols:
-            self.cell_col_cb.set("target")
-        elif "celltype" in cols:
-            self.cell_col_cb.set("celltype")
+        self.csv_path = path
+        self._log_csv(f"CSV file: {Path(path).name}")
         self.draw_btn.configure(state="normal")
-        self._log("Columns loaded. Please select X, Y, and Cell Type.")
 
-    def _start_worker(self) -> None:
-        x_col = self.x_col_cb.get()
-        y_col = self.y_col_cb.get()
-        cell_col = self.cell_col_cb.get()
-        if not all((x_col, y_col, cell_col)):
-            messagebox.showwarning("Selection Missing", "Please select X, Y, and Cell Type columns.")
-            return
+    def _start_csv_worker(self) -> None:
         self.load_btn.configure(state="disabled")
         self.draw_btn.configure(state="disabled")
-        threading.Thread(target=self._worker, args=(self.df, x_col, y_col, cell_col), daemon=True).start()
+        threading.Thread(target=self._csv_worker, daemon=True).start()
 
-    def _worker(self, df: pd.DataFrame, x_col: str, y_col: str, celltype_col: str) -> None:
+    def _csv_worker(self) -> None:
         try:
             self._queue.put(("progress", self._STEPS["start"]))
-            self._queue.put(("log", f"Computing distance matrix: x={x_col}, y={y_col}, cell={celltype_col}"))
-            row_df, _ = compute_cophenetic_distances_from_df(
-                df, x_col=x_col, y_col=y_col, celltype_col=celltype_col, output_dir=None
-            )
-            self._queue.put(("progress", self._STEPS["calc_dist"]))
+            self._queue.put(("log", "Reading CSV file…"))
+            df = pd.read_csv(self.csv_path)  # assume first two cols as matrix
 
-            self._queue.put(("log", "Generating high-res heatmap…"))
-            image = plot_cophenetic_heatmap(
-                row_df,
-                matrix_name="row_coph",
-                sample="",
-                return_image=True,
-                dpi=300,
-            )
+            self._queue.put(("progress", self._STEPS["calc_dist"]))
+            self._queue.put(("log", "Computing cophenetic distances…"))
+            # expects df with numeric data
+            r, c = compute_cophenetic_distances_from_df(df)
 
             self._queue.put(("progress", self._STEPS["plot"]))
-            self._queue.put(("log", "Heatmap generation complete"))
-            self._queue.put(("image", image))
-            self._queue.put(("progress", self._STEPS["done"]))
+            self._queue.put(("log", "Plotting heatmap…"))
+            img = plot_cophenetic_heatmap(r, matrix_name="row_coph", sample="", return_image=True, dpi=300)
 
-        except Exception as e:
-            err_msg = f"Worker error: {e}\n{traceback.format_exc()}"
-            _write_error(err_msg)
-            self._queue.put(("error", str(e)))
-        finally:
+            self._queue.put(("image", img))
             self._queue.put(("done", None))
+        except Exception:
+            tb = traceback.format_exc()
+            self._queue.put(("error", tb))
 
+    # -------- Xenium Tab Callbacks --------
+    def _ask_xenium_dir(self) -> None:
+        d = filedialog.askdirectory(title="Select Xenium Data Directory")
+        if not d:
+            return
+        self.xenium_path = d
+        self._log_x(f"Xenium dir: {d}")
+        self._enable_plot_x()
+
+    def _ask_selection_csv(self) -> None:
+        f = filedialog.askopenfilename(title="Select Selection CSV", filetypes=[("CSV", "*.csv")])
+        if not f:
+            return
+        self.selection_csv = f
+        self._log_x(f"Selection CSV: {Path(f).name}")
+        self._enable_plot_x()
+
+    def _enable_plot_x(self) -> None:
+        if self.xenium_path and self.selection_csv:
+            self.plot_x_btn.configure(state="normal")
+
+    def _start_xenium_worker(self) -> None:
+        self.xenium_btn.configure(state="disabled")
+        self.selcsv_btn.configure(state="disabled")
+        self.plot_x_btn.configure(state="disabled")
+        threading.Thread(target=self._xenium_worker, daemon=True).start()
+
+    def _xenium_worker(self) -> None:
+        try:
+            self._queue.put(("x_progress", self._STEPS["start"]))
+            self._queue.put(("x_log", "Loading Xenium data…"))
+            adata = load_xenium_data(self.xenium_path, normalize=False)
+
+            self._queue.put(("x_progress", self._STEPS["csv_read"]))
+            self._queue.put(("x_log", "Reading selection CSV…"))
+            df = pd.read_csv(self.selection_csv, comment="#", header=0)
+            cell_ids = df["Cell ID"].tolist()
+            sub = adata[adata.obs["cell_id"].isin(cell_ids)].copy()
+
+            self._queue.put(("x_progress", self._STEPS["calc_dist"]))
+            self._queue.put(("x_log", "Computing cophenetic distances…"))
+            r, c = compute_cophenetic_distances_from_adata(sub)
+
+            self._queue.put(("x_progress", self._STEPS["plot"]))
+            self._queue.put(("x_log", "Plotting heatmap…"))
+            img = plot_cophenetic_heatmap(
+                r, matrix_name="row_coph", sample="", return_image=True, dpi=300
+            )
+
+            self._queue.put(("x_image", img))
+            self._queue.put(("done", None))
+        except Exception:
+            tb = traceback.format_exc()
+            self._queue.put(("x_error", tb))
+
+    # -------- Queue Polling & Embedding --------
     def _poll_queue(self) -> None:
         try:
             while True:
                 tag, payload = self._queue.get_nowait()
+                # CSV tab
                 if tag == "log":
-                    self._log(payload)
+                    self._log_csv(payload)
                 elif tag == "progress":
                     val = int(payload)
                     self._progress.configure(value=val)
@@ -203,60 +234,81 @@ class MainApp(tk.Tk):
                 elif tag == "done":
                     self.load_btn.configure(state="normal")
                     self.draw_btn.configure(state="normal")
+                # Xenium tab
+                elif tag == "x_log":
+                    self._log_x(payload)
+                elif tag == "x_progress":
+                    v = int(payload)
+                    self._progress2.configure(value=v)
+                    self._prog_label2.configure(text=f"{v}%")
+                elif tag == "x_image":
+                    self._embed_image2(payload)
+                elif tag == "x_error":
+                    messagebox.showerror("Error", payload)
+                elif tag == "done":
+                    self.xenium_btn.configure(state="normal")
+                    self.selcsv_btn.configure(state="normal")
+                    self.plot_x_btn.configure(state="normal")
         except queue.Empty:
             pass
         finally:
             self.after(100, self._poll_queue)
 
-    def _embed_image(self, pil_img: Image.Image) -> None:
-        """Display PIL image"""
-        if self._image_frame is not None:
-            self._image_frame.destroy()
-            self._image_frame = None
+    def _log_csv(self, msg: str) -> None:
+        self.log_text.configure(state="normal")
+        self.log_text.insert(END, msg + "\n")
+        self.log_text.see("end")
+        self.log_text.configure(state="disabled")
 
+    def _log_x(self, msg: str) -> None:
+        self.log_text2.configure(state="normal")
+        self.log_text2.insert(END, msg + "\n")
+        self.log_text2.see("end")
+        self.log_text2.configure(state="disabled")
+
+    def _embed_image(self, pil_img: Image.Image) -> None:
+        if self._image_frame:
+            self._image_frame.destroy()
         self._image_frame = tk.Frame(self.display_frame)
         self._image_frame.pack(fill="both", expand=True)
-
-        self._scroll_canvas = tk.Canvas(self._image_frame)
-        vscroll = ttk.Scrollbar(self._image_frame, orient="vertical", command=self._scroll_canvas.yview)
-        hscroll = ttk.Scrollbar(self._image_frame, orient="horizontal", command=self._scroll_canvas.xview)
-
-        self._scroll_canvas.configure(yscrollcommand=vscroll.set, xscrollcommand=hscroll.set)
-
-        vscroll.pack(side="right", fill="y")
-        hscroll.pack(side="bottom", fill="x")
-        self._scroll_canvas.pack(side="left", fill="both", expand=True)
-
+        canvas = tk.Canvas(self._image_frame)
+        hbar = ttk.Scrollbar(self._image_frame, orient="horizontal", command=canvas.xview)
+        vbar = ttk.Scrollbar(self._image_frame, orient="vertical", command=canvas.yview)
+        canvas.configure(xscrollcommand=hbar.set, yscrollcommand=vbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        vbar.pack(side="right", fill="y")
+        hbar.pack(side="bottom", fill="x")
         self._photo = ImageTk.PhotoImage(pil_img)
-        inner_frame = tk.Frame(self._scroll_canvas)
-        self._scroll_canvas.create_window((0, 0), window=inner_frame, anchor="nw")
+        canvas.create_image(0, 0, image=self._photo, anchor="nw")
+        canvas.configure(scrollregion=canvas.bbox("all"))
+        canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
+        canvas.bind_all("<Button-4>", lambda e: canvas.yview_scroll(-1, "units"))
+        canvas.bind_all("<Button-5>", lambda e: canvas.yview_scroll(1, "units"))
 
-        img_lbl = tk.Label(inner_frame, image=self._photo)
-        img_lbl.pack()
+    def _embed_image2(self, pil_img: Image.Image) -> None:
+        if self._image_frame2:
+            self._image_frame2.destroy()
+        self._image_frame2 = tk.Frame(self.display_frame2)
+        self._image_frame2.pack(fill="both", expand=True)
+        canvas = tk.Canvas(self._image_frame2)
+        hbar = ttk.Scrollbar(self._image_frame2, orient="horizontal", command=canvas.xview)
+        vbar = ttk.Scrollbar(self._image_frame2, orient="vertical", command=canvas.yview)
+        canvas.configure(xscrollcommand=hbar.set, yscrollcommand=vbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        vbar.pack(side="right", fill="y")
+        hbar.pack(side="bottom", fill="x")
+        self._photo2 = ImageTk.PhotoImage(pil_img)
+        canvas.create_image(0, 0, image=self._photo2, anchor="nw")
+        canvas.configure(scrollregion=canvas.bbox("all"))
+        canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
+        canvas.bind_all("<Button-4>", lambda e: canvas.yview_scroll(-1, "units"))
+        canvas.bind_all("<Button-5>", lambda e: canvas.yview_scroll(1, "units"))
 
-        def _update_scrollregion(event):
-            self._scroll_canvas.configure(scrollregion=self._scroll_canvas.bbox("all"))
-        inner_frame.bind("<Configure>", _update_scrollregion)
-
-        def _on_mousewheel(event):
-            self._scroll_canvas.yview_scroll(-1 * (event.delta // 120), "units")
-        def _on_shift_mousewheel(event):
-            self._scroll_canvas.xview_scroll(-1 * (event.delta // 120), "units")
-
-        self._scroll_canvas.bind_all("<MouseWheel>", _on_mousewheel)
-        self._scroll_canvas.bind_all("<Shift-MouseWheel>", _on_shift_mousewheel)
-        self._scroll_canvas.bind_all("<Button-4>", lambda e: self._scroll_canvas.yview_scroll(-1, "units"))
-        self._scroll_canvas.bind_all("<Button-5>", lambda e: self._scroll_canvas.yview_scroll(1, "units"))
-
-        self._scroll_canvas.update_idletasks()
-        self._scroll_canvas.yview_moveto(0)
-        self._scroll_canvas.xview_moveto(0)
-
-        self._log("Image loaded — use mouse wheel or scrollbars to navigate")
 
 def main() -> None:
     app = MainApp()
     app.mainloop()
+
 
 if __name__ == "__main__":
     main()
