@@ -38,7 +38,7 @@ class MainApp(tk.Tk):
 
     def __init__(self) -> None:
         super().__init__()
-        self.title("SFPlot Cophenetic Heatmap")
+        self.title("CellGPS")
         self.geometry("900x700")
         self.report_callback_exception = self._handle_exception
         self._queue: queue.Queue[tuple[str, object]] = queue.Queue()
