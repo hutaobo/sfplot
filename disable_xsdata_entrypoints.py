@@ -1,51 +1,55 @@
 # disable_xsdata_entrypoints.py
 
-import importlib.metadata
+import sys
 
-# 先保存原始函数引用
-_original_entry_points = importlib.metadata.entry_points
-_original_distribution = importlib.metadata.distribution
+# 1) 先给 xsdata 自身的 hook 直接打补丁，保证万无一失
+try:
+    import xsdata.utils.hooks
+    xsdata.utils.hooks.load_entry_points = lambda *args, **kwargs: []
+except ImportError:
+    pass
 
-def _fake_entry_points(*args, **kwargs):
+# 2) 支持 Py3.8+ 自带的 importlib.metadata，也兼容旧版的 importlib_metadata
+try:
+    import importlib.metadata as _md
+except ImportError:
+    import importlib_metadata as _md
+
+# 保存原始引用
+_original_entry_points = _md.entry_points
+_original_distribution = _md.distribution
+
+def _fake_entry_points(**kwargs):
     """
-    当用户请求任何 entry_points() 时，
-    如果 filter 里包含 xsdata，就直接返回空列表
-    否则调用原函数。
+    拦截任何 importlib.metadata.entry_points(...) 调用，
+    过滤掉所有 module/value 里以 xsdata 打头的 entry‐points。
     """
-    eps = _original_entry_points(*args, **kwargs)
-    # importlib.metadata.entry_points() 在 Py ≥ 3.10 返回 EntryPoints 对象，
-    # 在更老版本返回 dict-of-lists；统一处理：
+    eps = _original_entry_points(**kwargs)
+
+    # 新版返回 EntryPoints 对象
     try:
-        # 如果是 3.10+，过滤掉 xsdata 相关
-        filtered = [ep for ep in eps if not ep.module.startswith("xsdata")]
+        # EntryPoints 是一个可迭代的集合
+        filtered = [ep for ep in eps if not ep.value.split(":")[0].startswith("xsdata")]
         return type(eps)(filtered)
     except Exception:
-        # 老旧格式，下钻到 group
+        # 旧版返回 dict-of-lists
         new = {}
-        for grp, lst in eps.items():
-            new[grp] = [ep for ep in lst if not ep.module.startswith("xsdata")]
+        for group, lst in eps.items():
+            new[group] = [ep for ep in lst if not ep.value.split(":")[0].startswith("xsdata")]
         return new
 
 def _fake_distribution(name, *args, **kwargs):
     """
-    当调用 distribution('xsdata-pydantic-basemodel') 时，
-    直接模拟一个“空”的包，避免找不到 metadata 报错。
-    其它包照常调用。
+    拦截 importlib.metadata.distribution("xsdata…")，
+    返回一个最小化的 Dummy 对象，只实现 entry_points()。
     """
     if name.startswith("xsdata"):
-        # 创建一个假的 Distribution 对象，只要实现 entry_points 方法
-        class FakeDist:
-            def entry_points(self_inner):
+        class _DummyDist:
+            def entry_points(self):
                 return []
-        return FakeDist()
+        return _DummyDist()
     return _original_distribution(name, *args, **kwargs)
 
-# 最后把 importlib.metadata 里相关函数替换掉
-importlib.metadata.entry_points = _fake_entry_points
-importlib.metadata.distribution = _fake_distribution
-
-# （可选）也保留你原来的 xsdata hook，以防有人直接 import xsdata.utils.hooks
-import xsdata.utils.hooks
-def _no_entrypoints(*args, **kwargs):
-    return []
-xsdata.utils.hooks.load_entry_points = _no_entrypoints
+# 最后替换掉 importlib.metadata / importlib_metadata 里的两个函数
+_md.entry_points   = _fake_entry_points
+_md.distribution   = _fake_distribution
