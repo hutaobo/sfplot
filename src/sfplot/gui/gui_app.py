@@ -72,6 +72,12 @@ class MainApp(tk.Tk):
         self.load_btn.pack(side="left")
         self.draw_btn = tk.Button(top, text="Plot CSV Heatmap", state="disabled", command=self._start_csv_worker)
         self.draw_btn.pack(side="left", padx=5)
+        # Zoom control
+        self.scale_var = tk.DoubleVar(value=1.0)
+        zoom_menu = ttk.OptionMenu(top, self.scale_var, 1.0, 0.25, 0.5, 1.0, 2.0, 4.0, command=self._on_scale_change_csv)
+        tk.Label(top, text="Zoom:").pack(side="left", padx=(20,0))
+        zoom_menu.pack(side="left")
+        # Progress
         self._progress = ttk.Progressbar(top, mode="determinate", length=200, maximum=100)
         self._progress.pack(side="left", padx=10)
         self._progress_label = tk.Label(top, text="0%")
@@ -89,8 +95,8 @@ class MainApp(tk.Tk):
 
         # State
         self.csv_path: str | None = None
+        self._orig_img: Image.Image | None = None
         self._photo: ImageTk.PhotoImage | None = None
-        self._scroll_canvas: tk.Canvas | None = None
         self._image_frame: tk.Frame | None = None
 
     def _build_xenium_tab(self) -> None:
@@ -103,6 +109,12 @@ class MainApp(tk.Tk):
         self.selcsv_btn.pack(side="left", padx=5)
         self.plot_x_btn = tk.Button(top2, text="Plot Xenium Heatmap", state="disabled", command=self._start_xenium_worker)
         self.plot_x_btn.pack(side="left", padx=5)
+        # Zoom control
+        self.scale_var2 = tk.DoubleVar(value=1.0)
+        zoom_menu2 = ttk.OptionMenu(top2, self.scale_var2, 1.0, 0.25, 0.5, 1.0, 2.0, 4.0, command=self._on_scale_change_x)
+        tk.Label(top2, text="Zoom:").pack(side="left", padx=(20,0))
+        zoom_menu2.pack(side="left")
+        # Progress
         self._progress2 = ttk.Progressbar(top2, mode="determinate", length=200, maximum=100)
         self._progress2.pack(side="left", padx=10)
         self._prog_label2 = tk.Label(top2, text="0%")
@@ -121,8 +133,8 @@ class MainApp(tk.Tk):
         # State
         self.xenium_path: str | None = None
         self.selection_csv: str | None = None
+        self._orig_img2: Image.Image | None = None
         self._photo2: ImageTk.PhotoImage | None = None
-        self._scroll_canvas2: tk.Canvas | None = None
         self._image_frame2: tk.Frame | None = None
 
     # -------- CSV Tab Callbacks --------
@@ -143,11 +155,10 @@ class MainApp(tk.Tk):
         try:
             self._queue.put(("progress", self._STEPS["start"]))
             self._queue.put(("log", "Reading CSV file…"))
-            df = pd.read_csv(self.csv_path)  # assume first two cols as matrix
+            df = pd.read_csv(self.csv_path)
 
             self._queue.put(("progress", self._STEPS["calc_dist"]))
             self._queue.put(("log", "Computing cophenetic distances…"))
-            # expects df with numeric data
             r, c = compute_cophenetic_distances_from_df(df)
 
             self._queue.put(("progress", self._STEPS["plot"]))
@@ -159,6 +170,10 @@ class MainApp(tk.Tk):
         except Exception:
             tb = traceback.format_exc()
             self._queue.put(("error", tb))
+
+    def _on_scale_change_csv(self, _=None) -> None:
+        if self._orig_img:
+            self._display_csv_image(self._orig_img)
 
     # -------- Xenium Tab Callbacks --------
     def _ask_xenium_dir(self) -> None:
@@ -184,131 +199,3 @@ class MainApp(tk.Tk):
     def _start_xenium_worker(self) -> None:
         self.xenium_btn.configure(state="disabled")
         self.selcsv_btn.configure(state="disabled")
-        self.plot_x_btn.configure(state="disabled")
-        threading.Thread(target=self._xenium_worker, daemon=True).start()
-
-    def _xenium_worker(self) -> None:
-        try:
-            self._queue.put(("x_progress", self._STEPS["start"]))
-            self._queue.put(("x_log", "Loading Xenium data…"))
-            adata = load_xenium_data(self.xenium_path, normalize=False)
-
-            self._queue.put(("x_progress", self._STEPS["csv_read"]))
-            self._queue.put(("x_log", "Reading selection CSV…"))
-            df = pd.read_csv(self.selection_csv, comment="#", header=0)
-            cell_ids = df["Cell ID"].tolist()
-            sub = adata[adata.obs["cell_id"].isin(cell_ids)].copy()
-
-            self._queue.put(("x_progress", self._STEPS["calc_dist"]))
-            self._queue.put(("x_log", "Computing cophenetic distances…"))
-            r, c = compute_cophenetic_distances_from_adata(sub)
-
-            self._queue.put(("x_progress", self._STEPS["plot"]))
-            self._queue.put(("x_log", "Plotting heatmap…"))
-            img = plot_cophenetic_heatmap(
-                r, matrix_name="row_coph", sample="", return_image=True, dpi=300
-            )
-
-            self._queue.put(("x_image", img))
-            self._queue.put(("done", None))
-        except Exception:
-            tb = traceback.format_exc()
-            self._queue.put(("x_error", tb))
-
-    # -------- Queue Polling & Embedding --------
-    def _poll_queue(self) -> None:
-        try:
-            while True:
-                tag, payload = self._queue.get_nowait()
-                # CSV tab
-                if tag == "log":
-                    self._log_csv(payload)
-                elif tag == "progress":
-                    val = int(payload)
-                    self._progress.configure(value=val)
-                    self._progress_label.configure(text=f"{val}%")
-                elif tag == "image":
-                    self._embed_image(payload)
-                elif tag == "error":
-                    messagebox.showerror("Error", payload)
-                elif tag == "done":
-                    self.load_btn.configure(state="normal")
-                    self.draw_btn.configure(state="normal")
-                # Xenium tab
-                elif tag == "x_log":
-                    self._log_x(payload)
-                elif tag == "x_progress":
-                    v = int(payload)
-                    self._progress2.configure(value=v)
-                    self._prog_label2.configure(text=f"{v}%")
-                elif tag == "x_image":
-                    self._embed_image2(payload)
-                elif tag == "x_error":
-                    messagebox.showerror("Error", payload)
-                elif tag == "done":
-                    self.xenium_btn.configure(state="normal")
-                    self.selcsv_btn.configure(state="normal")
-                    self.plot_x_btn.configure(state="normal")
-        except queue.Empty:
-            pass
-        finally:
-            self.after(100, self._poll_queue)
-
-    def _log_csv(self, msg: str) -> None:
-        self.log_text.configure(state="normal")
-        self.log_text.insert(END, msg + "\n")
-        self.log_text.see("end")
-        self.log_text.configure(state="disabled")
-
-    def _log_x(self, msg: str) -> None:
-        self.log_text2.configure(state="normal")
-        self.log_text2.insert(END, msg + "\n")
-        self.log_text2.see("end")
-        self.log_text2.configure(state="disabled")
-
-    def _embed_image(self, pil_img: Image.Image) -> None:
-        if self._image_frame:
-            self._image_frame.destroy()
-        self._image_frame = tk.Frame(self.display_frame)
-        self._image_frame.pack(fill="both", expand=True)
-        canvas = tk.Canvas(self._image_frame)
-        hbar = ttk.Scrollbar(self._image_frame, orient="horizontal", command=canvas.xview)
-        vbar = ttk.Scrollbar(self._image_frame, orient="vertical", command=canvas.yview)
-        canvas.configure(xscrollcommand=hbar.set, yscrollcommand=vbar.set)
-        canvas.pack(side="left", fill="both", expand=True)
-        vbar.pack(side="right", fill="y")
-        hbar.pack(side="bottom", fill="x")
-        self._photo = ImageTk.PhotoImage(pil_img)
-        canvas.create_image(0, 0, image=self._photo, anchor="nw")
-        canvas.configure(scrollregion=canvas.bbox("all"))
-        canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
-        canvas.bind_all("<Button-4>", lambda e: canvas.yview_scroll(-1, "units"))
-        canvas.bind_all("<Button-5>", lambda e: canvas.yview_scroll(1, "units"))
-
-    def _embed_image2(self, pil_img: Image.Image) -> None:
-        if self._image_frame2:
-            self._image_frame2.destroy()
-        self._image_frame2 = tk.Frame(self.display_frame2)
-        self._image_frame2.pack(fill="both", expand=True)
-        canvas = tk.Canvas(self._image_frame2)
-        hbar = ttk.Scrollbar(self._image_frame2, orient="horizontal", command=canvas.xview)
-        vbar = ttk.Scrollbar(self._image_frame2, orient="vertical", command=canvas.yview)
-        canvas.configure(xscrollcommand=hbar.set, yscrollcommand=vbar.set)
-        canvas.pack(side="left", fill="both", expand=True)
-        vbar.pack(side="right", fill="y")
-        hbar.pack(side="bottom", fill="x")
-        self._photo2 = ImageTk.PhotoImage(pil_img)
-        canvas.create_image(0, 0, image=self._photo2, anchor="nw")
-        canvas.configure(scrollregion=canvas.bbox("all"))
-        canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
-        canvas.bind_all("<Button-4>", lambda e: canvas.yview_scroll(-1, "units"))
-        canvas.bind_all("<Button-5>", lambda e: canvas.yview_scroll(1, "units"))
-
-
-def main() -> None:
-    app = MainApp()
-    app.mainloop()
-
-
-if __name__ == "__main__":
-    main()
