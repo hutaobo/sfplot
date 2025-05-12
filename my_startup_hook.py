@@ -1,3 +1,5 @@
+# my_startup_hook.py
+
 import sys
 import os
 import logging
@@ -37,5 +39,39 @@ def global_exception_handler(exctype, value, tb):
     # Optionally call the default excepthook to print to console
     sys.__excepthook__(exctype, value, tb)
 
-# Install the hook
+# Install the exception hook
 sys.excepthook = global_exception_handler
+
+
+# ------------------------------------------------------------
+# Monkey-patch tkinter.Tk to destroy the splash screen
+# ------------------------------------------------------------
+try:
+    import tkinter as _tk
+
+    # Save original Tk class
+    _OriginalTk = _tk.Tk
+
+    def _SplashAwareTk(*args, **kwargs):
+        """
+        Before creating the real main window, destroy the splash if it exists.
+        """
+        # Destroy splash window created by splash_hook.py
+        try:
+            splash = getattr(sys, "_splash_root", None)
+            if splash:
+                splash.destroy()
+                # Remove reference so we don't try again
+                del sys._splash_root
+        except Exception:
+            pass
+
+        # Now create the actual main Tk window
+        return _OriginalTk(*args, **kwargs)
+
+    # Override Tk in this runtime
+    _tk.Tk = _SplashAwareTk
+
+except ImportError:
+    # If tkinter isn't available, skip this step
+    pass
