@@ -4,17 +4,16 @@ import sys
 import os
 from PyInstaller.utils.hooks import collect_dynamic_libs
 
-# 1) 收集 tkinter 本身的动态库（tk86t.dll、tcl86t.dll 等）
+# 1) 收集 tkinter 的 DLL（tk86t.dll、tcl86t.dll 等）
 binaries = collect_dynamic_libs('tkinter')
 
-# 2) 把 Conda 环境下的 tcl8.6、tk8.6 脚本目录完整打进去，
-#    并且放到程序运行时解压目录下的 lib/ 下，这样 Tkinter 就能找到 init.tcl 了。
+# 2) 收集 tcl 和 tk 资源目录
 datas = []
-prefix = sys.prefix
-# Conda 环境的 tcl 脚本一般在 <env>/Library/tcl
-tcl_root = os.path.join(prefix, 'Library', 'tcl')
-for sub in ('tcl8.6', 'tk8.6'):
-    src = os.path.join(tcl_root, sub)
-    if os.path.isdir(src):
-        # 解压后会在 sys._MEIPASS/lib/tcl8.6 和 lib/tk8.6
-        datas.append((src, os.path.join('lib', sub)))
+# Windows 下 conda 环境的 Tcl/Tk 路径，一般在 sys.exec_prefix/tcl/...
+tcl_root = os.path.join(sys.exec_prefix, 'tcl', 'tcl8.6')
+tk_root  = os.path.join(sys.exec_prefix, 'tcl', 'tk8.6')
+
+if os.path.isdir(tcl_root):
+    datas.append((tcl_root, os.path.join('tcl', 'tcl8.6')))
+if os.path.isdir(tk_root):
+    datas.append((tk_root,  os.path.join('tcl', 'tk8.6')))
