@@ -1,15 +1,30 @@
 # -*- coding: utf-8 -*-
 # PyInstaller 启动运行时 hook：my_startup_hook.py
-# 用于在应用启动时显示 splash.png 启动画面，并负责在主窗口加载后自动关闭启动画面。
-# 同时设置全局异常捕获，将未处理异常记录到日志。
 
 import sys
 import os
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 0) 在冻结（onefile）模式下，强制设置 tcl/tk 的库目录
+# ──────────────────────────────────────────────────────────────────────────────
+if getattr(sys, 'frozen', False):
+    base_path = sys._MEIPASS  # PyInstaller 解压目录
+    # 这两个目录必须跟你的 hook-tkinter.py 里收集的保持一致
+    os.environ['TCL_LIBRARY'] = os.path.join(base_path, 'tcl', 'tcl8.6')
+    os.environ['TK_LIBRARY'] = os.path.join(base_path, 'tcl', 'tk8.6')
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 接下来再导入 tkinter，就会正确在上面两个目录里寻找 init.tcl
+# ──────────────────────────────────────────────────────────────────────────────
 import tkinter as tk
 import threading
 import traceback
+import logging
+from pathlib import Path
 
-# -------------- 启动画面（Splash）显示逻辑 --------------
+# ──────────────────────────────────────────────────────────────────────────────
+# 1) 显示 Splash
+# ──────────────────────────────────────────────────────────────────────────────
 # 获取打包后资源目录中 splash.png 的路径。
 # 在 PyInstaller onefile 模式下，资源被提取到临时文件夹，路径由 sys._MEIPASS 提供。
 # 如果未打包 (开发模式运行)，则直接使用当前文件所在目录。
