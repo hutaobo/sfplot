@@ -79,27 +79,30 @@ class MainApp(tk.Tk):
         self.load_btn.pack(side="left")
         self.draw_btn = tk.Button(top, text="Plot CSV Heatmap", state="disabled", command=self._start_csv_worker)
         self.draw_btn.pack(side="left", padx=5)
-        # Zoom
+
+        # Zoom control
         self.scale_var = tk.DoubleVar(value=1.0)
-        tk.Label(top, text="Zoom:").pack(side="left", padx=(20,0))
-        ttk.OptionMenu(top, self.scale_var, 1.0, 0.25, 0.5, 1.0, 2.0, 4.0, command=self._on_scale_change_csv).pack(side="left")
-        # Progress
+        tk.Label(top, text="Zoom:").pack(side="left", padx=(20, 0))
+        ttk.OptionMenu(top, self.scale_var, 1.0, 0.25, 0.5, 1.0, 2.0, 4.0,
+                       command=self._on_scale_change_csv).pack(side="left")
+
+        # Progress bar
         self._progress = ttk.Progressbar(top, mode="determinate", length=200, maximum=100)
         self._progress.pack(side="left", padx=10)
         self._progress_label = tk.Label(top, text="0%")
         self._progress_label.pack(side="left")
 
-        # Display frame
+        # Display area
         self.display_frame = tk.LabelFrame(self.tab_csv, text="Display Area")
         self.display_frame.pack(side="right", fill="both", expand=True, padx=5, pady=5)
 
-        # Log frame
+        # Log area
         log_frame = tk.LabelFrame(self.tab_csv, text="Running Log")
         log_frame.pack(side="left", fill="y", padx=5, pady=5)
         self.log_text = tk.Text(log_frame, width=30, state="disabled")
         self.log_text.pack(fill="both", expand=True)
 
-        # State
+        # State variables
         self.csv_path: str | None = None
         self._orig_img: Image.Image | None = None
         self._photo: ImageTk.PhotoImage | None = None
@@ -109,50 +112,76 @@ class MainApp(tk.Tk):
         top2 = tk.Frame(self.tab_xenium)
         top2.pack(fill="x", padx=5, pady=5)
 
-        # 1) select Xenium directory
+        # 1) Select Xenium directory
         self.xenium_btn = tk.Button(top2, text="Select Xenium Dir", command=self._ask_xenium_dir)
         self.xenium_btn.pack(side="left")
-        # 2) load data button
-        self.load_xenium_btn = tk.Button(top2, text="Load Xenium Data", state="disabled",
-                                         command=self._load_xenium_data)
+
+        # 2) Load Xenium data
+        self.load_xenium_btn = tk.Button(
+            top2,
+            text="Load Xenium Data",
+            state="disabled",
+            command=self._load_xenium_data,
+        )
         self.load_xenium_btn.pack(side="left", padx=5)
-        # 3) after loaded, select CSV
-        self.selcsv_btn = tk.Button(top2, text="Select Selection CSV", state="disabled",
-                                    command=self._ask_selection_csv)
+
+        # 3) Select Selection CSV
+        self.selcsv_btn = tk.Button(
+            top2,
+            text="Select Selection CSV",
+            state="disabled",
+            command=self._ask_selection_csv,
+        )
         self.selcsv_btn.pack(side="left", padx=5)
-        # 4) plot button
-        self.plot_x_btn = tk.Button(top2, text="Plot Xenium Heatmap", state="disabled",
-                                    command=self._start_xenium_plot)
+
+        # 4) Plot Xenium heatmap
+        self.plot_x_btn = tk.Button(
+            top2,
+            text="Plot Xenium Heatmap",
+            state="disabled",
+            command=self._start_xenium_plot,
+        )
         self.plot_x_btn.pack(side="left", padx=5)
 
-        # Zoom
+        # Zoom control
         self.scale_var2 = tk.DoubleVar(value=1.0)
-        tk.Label(top2, text="Zoom:").pack(side="left", padx=(20,0))
-        ttk.OptionMenu(top2, self.scale_var2, 1.0, 0.25, 0.5, 1.0, 2.0, 4.0, command=self._on_scale_change_x).pack(side="left")
-        # Progress
+        tk.Label(top2, text="Zoom:").pack(side="left", padx=(20, 0))
+        ttk.OptionMenu(
+            top2,
+            self.scale_var2,
+            1.0,
+            0.25,
+            0.5,
+            1.0,
+            2.0,
+            4.0,
+            command=self._on_scale_change_x,
+        ).pack(side="left")
+
+        # Progress bar
         self._progress2 = ttk.Progressbar(top2, mode="determinate", length=200, maximum=100)
         self._progress2.pack(side="left", padx=10)
         self._prog_label2 = tk.Label(top2, text="0%")
         self._prog_label2.pack(side="left")
 
-        # Display frame
+        # Display area
         self.display_frame2 = tk.LabelFrame(self.tab_xenium, text="Display Area")
         self.display_frame2.pack(side="right", fill="both", expand=True, padx=5, pady=5)
 
-        # Log frame
+        # Log area
         log_frame2 = tk.LabelFrame(self.tab_xenium, text="Running Log")
         log_frame2.pack(side="left", fill="y", padx=5, pady=5)
         self.log_text2 = tk.Text(log_frame2, width=30, state="disabled")
         self.log_text2.pack(fill="both", expand=True)
 
-        # State
+        # State variables
         self.xenium_path: str | None = None
         self.selection_csv: str | None = None
         self._orig_img2: Image.Image | None = None
 
     # -------- CSV callbacks --------
     def _ask_csv_file(self) -> None:
-        path = filedialog.askopenfilename(filetypes=[("CSV","*.csv")])
+        path = filedialog.askopenfilename(filetypes=[("CSV", "*.csv")])
         if not path:
             return
         self.csv_path = path
@@ -171,7 +200,7 @@ class MainApp(tk.Tk):
             df = pd.read_csv(self.csv_path)
             self._queue.put(("progress", self._STEPS["calc_dist"]))
             self._queue.put(("log", "Computing distances…"))
-            r,_ = compute_cophenetic_distances_from_df(df)
+            r, _ = compute_cophenetic_distances_from_df(df)
             self._queue.put(("progress", self._STEPS["plot"]))
             self._queue.put(("log", "Plotting heatmap…"))
             img = plot_cophenetic_heatmap(r, matrix_name="row_coph", sample="", return_image=True, dpi=300)
@@ -208,7 +237,7 @@ class MainApp(tk.Tk):
             self._queue.put(("x_error", traceback.format_exc()))
 
     def _ask_selection_csv(self) -> None:
-        path = filedialog.askopenfilename(filetypes=[("CSV","*.csv")])
+        path = filedialog.askopenfilename(filetypes=[("CSV", "*.csv")])
         if not path:
             return
         self.selection_csv = path
@@ -225,12 +254,16 @@ class MainApp(tk.Tk):
             df = pd.read_csv(self.selection_csv, comment="#")
             cell_ids = df["Cell ID"].tolist()
             sub = self.adata_cache[self.adata_cache.obs["cell_id"].isin(cell_ids)].copy()
-            r,_ = compute_cophenetic_distances_from_adata(sub)
+            r, _ = compute_cophenetic_distances_from_adata(sub)
             img = plot_cophenetic_heatmap(r, matrix_name="row_coph", sample="", return_image=True, dpi=300)
             self._queue.put(("x_image", img))
             self._queue.put(("x_enable_csv", None))
         except Exception:
             self._queue.put(("x_error", traceback.format_exc()))
+
+    def _on_scale_change_x(self, _=None) -> None:
+        if self._orig_img2:
+            self._display_x_image(self._orig_img2)
 
     # -------- Polling & display --------
     def _poll_queue(self) -> None:
@@ -284,7 +317,7 @@ class MainApp(tk.Tk):
         self.log_text2.see("end")
         self.log_text2.configure(state="disabled")
 
-    # Image display methods (same as before)
+    # Image display methods
     def _display_csv_image(self, pil_img: Image.Image) -> None:
         self._orig_img = pil_img
         self.display_frame.update_idletasks()
@@ -301,7 +334,7 @@ class MainApp(tk.Tk):
         self._image_frame = tk.Frame(self.display_frame)
         self._image_frame.pack(fill="both", expand=True)
         canvas = tk.Canvas(self._image_frame)
-        hbar = ttk.Scrollbar(self._image_frame, orient="horizontal", command=canvas.xview)
+        hbar = ttk.Scrollbar(self._image_frame, orient="horizontal", command=	canvas.xview)
         vbar = ttk.Scrollbar(self._image_frame, orient="vertical", command=canvas.yview)
         canvas.configure(xscrollcommand=hbar.set, yscrollcommand=vbar.set)
         canvas.pack(side="left", fill="both", expand=True)
@@ -342,3 +375,7 @@ class MainApp(tk.Tk):
         canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
         canvas.bind_all("<Button-4>", lambda e: canvas.yview_scroll(-1, "units"))
         canvas.bind_all("<Button-5>", lambda e: canvas.yview_scroll(1, "units"))
+
+
+if __name__ == "__main__":
+    main()
