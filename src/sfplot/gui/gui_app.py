@@ -102,7 +102,11 @@ class MainApp(tk.Tk):
         self.log_text = tk.Text(log_frame, width=30, state="disabled")
         self.log_text.pack(fill="both", expand=True)
 
-        # State variables
+                # State variables
+        self.xenium_path: str | None = None
+        self.selection_csv: str | None = None
+        self._orig_img2: Image.Image | None = None
+        self._image_frame2: tk.Frame | None = None
         self.csv_path: str | None = None
         self._orig_img: Image.Image | None = None
         self._photo: ImageTk.PhotoImage | None = None
@@ -324,11 +328,11 @@ class MainApp(tk.Tk):
         max_w = self.display_frame.winfo_width() - 20
         max_h = self.display_frame.winfo_height() - 20
         img = pil_img.copy()
-        img.thumbnail((max_w, max_h), Image.ANTIALIAS)
+        img.thumbnail((max_w, max_h), Image.LANCZOS)
         scale = self.scale_var.get()
         nw = int(img.width * scale)
         nh = int(img.height * scale)
-        img = img.resize((nw, nh), Image.ANTIALIAS)
+        img = img.resize((nw, nh), Image.LANCZOS)
         if self._image_frame:
             self._image_frame.destroy()
         self._image_frame = tk.Frame(self.display_frame)
@@ -353,11 +357,11 @@ class MainApp(tk.Tk):
         max_w = self.display_frame2.winfo_width() - 20
         max_h = self.display_frame2.winfo_height() - 20
         img = pil_img.copy()
-        img.thumbnail((max_w, max_h), Image.ANTIALIAS)
+        img.thumbnail((max_w, max_h), Image.LANCZOS)
         scale = self.scale_var2.get()
         nw = int(img.width * scale)
         nh = int(img.height * scale)
-        img = img.resize((nw, nh), Image.ANTIALIAS)
+        img = img.resize((nw, nh), Image.LANCZOS)
         if self._image_frame2:
             self._image_frame2.destroy()
         self._image_frame2 = tk.Frame(self.display_frame2)
