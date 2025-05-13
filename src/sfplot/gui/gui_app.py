@@ -30,6 +30,11 @@ def resource_path(relative_path: str) -> str:
     return str(Path(base_path) / relative_path)
 
 
+def main() -> None:
+    app = MainApp()
+    app.mainloop()
+
+
 class MainApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
@@ -46,16 +51,19 @@ class MainApp(tk.Tk):
             "done": 100,
         }
 
+        # Cache for Xenium AnnData after load
+        self.adata_cache: object | None = None
+
         # Notebook (tabs)
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True)
 
-        # --- Tab 1: CSV Heatmap ---
+        # Tab 1: CSV Heatmap
         self.tab_csv = tk.Frame(self.notebook)
         self.notebook.add(self.tab_csv, text="CSV Heatmap")
         self._build_csv_tab()
 
-        # --- Tab 2: Xenium Heatmap ---
+        # Tab 2: Xenium Heatmap
         self.tab_xenium = tk.Frame(self.notebook)
         self.notebook.add(self.tab_xenium, text="Xenium Heatmap")
         self._build_xenium_tab()
@@ -100,12 +108,23 @@ class MainApp(tk.Tk):
     def _build_xenium_tab(self) -> None:
         top2 = tk.Frame(self.tab_xenium)
         top2.pack(fill="x", padx=5, pady=5)
+
+        # 1) select Xenium directory
         self.xenium_btn = tk.Button(top2, text="Select Xenium Dir", command=self._ask_xenium_dir)
         self.xenium_btn.pack(side="left")
-        self.selcsv_btn = tk.Button(top2, text="Select Selection CSV", command=self._ask_selection_csv)
+        # 2) load data button
+        self.load_xenium_btn = tk.Button(top2, text="Load Xenium Data", state="disabled",
+                                         command=self._load_xenium_data)
+        self.load_xenium_btn.pack(side="left", padx=5)
+        # 3) after loaded, select CSV
+        self.selcsv_btn = tk.Button(top2, text="Select Selection CSV", state="disabled",
+                                    command=self._ask_selection_csv)
         self.selcsv_btn.pack(side="left", padx=5)
-        self.plot_x_btn = tk.Button(top2, text="Plot Xenium Heatmap", state="disabled", command=self._start_xenium_worker)
+        # 4) plot button
+        self.plot_x_btn = tk.Button(top2, text="Plot Xenium Heatmap", state="disabled",
+                                    command=self._start_xenium_plot)
         self.plot_x_btn.pack(side="left", padx=5)
+
         # Zoom
         self.scale_var2 = tk.DoubleVar(value=1.0)
         tk.Label(top2, text="Zoom:").pack(side="left", padx=(20,0))
@@ -130,8 +149,6 @@ class MainApp(tk.Tk):
         self.xenium_path: str | None = None
         self.selection_csv: str | None = None
         self._orig_img2: Image.Image | None = None
-        self._photo2: ImageTk.PhotoImage | None = None
-        self._image_frame2: tk.Frame | None = None
 
     # -------- CSV callbacks --------
     def _ask_csv_file(self) -> None:
@@ -169,54 +186,51 @@ class MainApp(tk.Tk):
 
     # -------- Xenium callbacks --------
     def _ask_xenium_dir(self) -> None:
-        d = filedialog.askdirectory()
-        if not d:
+        path = filedialog.askdirectory(title="Select Xenium Data Directory")
+        if not path:
             return
-        self.xenium_path = d
-        self._log_x(f"Xenium dir: {d}")
-        self._enable_plot_x()
+        self.xenium_path = path
+        self._log_x(f"Xenium dir selected: {path}")
+        self.load_xenium_btn.configure(state="normal")
 
-    def _ask_selection_csv(self) -> None:
-        f = filedialog.askopenfilename(filetypes=[("CSV","*.csv")])
-        if not f:
-            return
-        self.selection_csv = f
-        self._log_x(f"Selection CSV: {Path(f).name}")
-        self._enable_plot_x()
-
-    def _enable_plot_x(self) -> None:
-        if self.xenium_path and self.selection_csv:
-            self.plot_x_btn.configure(state="normal")
-
-    def _start_xenium_worker(self) -> None:
+    def _load_xenium_data(self) -> None:
         self.xenium_btn.configure(state="disabled")
-        self.selcsv_btn.configure(state="disabled")
-        self.plot_x_btn.configure(state="disabled")
-        threading.Thread(target=self._xenium_worker, daemon=True).start()
+        self.load_xenium_btn.configure(state="disabled")
+        threading.Thread(target=self._xenium_load_worker, daemon=True).start()
 
-    def _xenium_worker(self) -> None:
+    def _xenium_load_worker(self) -> None:
         try:
-            self._queue.put(("x_progress", self._STEPS["start"]))
             self._queue.put(("x_log", "Loading Xenium data…"))
-            adata = load_xenium_data(self.xenium_path, normalize=False)
-            self._queue.put(("x_progress", self._STEPS["csv_read"]))
-            self._queue.put(("x_log", "Reading selection CSV…"))
-            df = pd.read_csv(self.selection_csv, comment="#", header=0)
-            sub = adata[adata.obs["cell_id"].isin(df["Cell ID"].tolist())].copy()
-            self._queue.put(("x_progress", self._STEPS["calc_dist"]))
-            self._queue.put(("x_log", "Computing distances…"))
-            r,_ = compute_cophenetic_distances_from_adata(sub)
-            self._queue.put(("x_progress", self._STEPS["plot"]))
-            self._queue.put(("x_log", "Plotting heatmap…"))
-            img = plot_cophenetic_heatmap(r, matrix_name="row_coph", sample="", return_image=True, dpi=300)
-            self._queue.put(("x_image", img))
-            self._queue.put(("done", None))
+            self.adata_cache = load_xenium_data(self.xenium_path, normalize=False)
+            self._queue.put(("x_log", "Xenium data loaded."))
+            self._queue.put(("x_enable_csv", None))
         except Exception:
             self._queue.put(("x_error", traceback.format_exc()))
 
-    def _on_scale_change_x(self, _=None) -> None:
-        if self._orig_img2:
-            self._display_x_image(self._orig_img2)
+    def _ask_selection_csv(self) -> None:
+        path = filedialog.askopenfilename(filetypes=[("CSV","*.csv")])
+        if not path:
+            return
+        self.selection_csv = path
+        self._log_x(f"Selection CSV: {Path(path).name}")
+        self.plot_x_btn.configure(state="normal")
+
+    def _start_xenium_plot(self) -> None:
+        self.selcsv_btn.configure(state="disabled")
+        self.plot_x_btn.configure(state="disabled")
+        threading.Thread(target=self._xenium_plot_worker, daemon=True).start()
+
+    def _xenium_plot_worker(self) -> None:
+        try:
+            df = pd.read_csv(self.selection_csv, comment="#")
+            cell_ids = df["Cell ID"].tolist()
+            sub = self.adata_cache[self.adata_cache.obs["cell_id"].isin(cell_ids)].copy()
+            r,_ = compute_cophenetic_distances_from_adata(sub)
+            img = plot_cophenetic_heatmap(r, matrix_name="row_coph", sample="", return_image=True, dpi=300)
+            self._queue.put(("x_image", img))
+            self._queue.put(("x_enable_csv", None))
+        except Exception:
+            self._queue.put(("x_error", traceback.format_exc()))
 
     # -------- Polling & display --------
     def _poll_queue(self) -> None:
@@ -246,15 +260,18 @@ class MainApp(tk.Tk):
                     self._display_x_image(payload)
                 elif tag == "x_error":
                     messagebox.showerror("Error", payload)
-                elif tag == "done":
-                    self.xenium_btn.configure(state="normal")
+                elif tag == "x_enable_csv":
                     self.selcsv_btn.configure(state="normal")
                     self.plot_x_btn.configure(state="normal")
+                elif tag == "done":
+                    self.xenium_btn.configure(state="normal")
+                    self.load_xenium_btn.configure(state="normal")
         except queue.Empty:
             pass
         finally:
             self.after(100, self._poll_queue)
 
+    # Logging
     def _log_csv(self, msg: str) -> None:
         self.log_text.configure(state="normal")
         self.log_text.insert(END, msg + "\n")
@@ -267,20 +284,18 @@ class MainApp(tk.Tk):
         self.log_text2.see("end")
         self.log_text2.configure(state="disabled")
 
+    # Image display methods (same as before)
     def _display_csv_image(self, pil_img: Image.Image) -> None:
-        # initial fit
         self._orig_img = pil_img
         self.display_frame.update_idletasks()
         max_w = self.display_frame.winfo_width() - 20
         max_h = self.display_frame.winfo_height() - 20
         img = pil_img.copy()
         img.thumbnail((max_w, max_h), Image.ANTIALIAS)
-        # zoom
         scale = self.scale_var.get()
         nw = int(img.width * scale)
         nh = int(img.height * scale)
         img = img.resize((nw, nh), Image.ANTIALIAS)
-        # render
         if self._image_frame:
             self._image_frame.destroy()
         self._image_frame = tk.Frame(self.display_frame)
@@ -327,12 +342,3 @@ class MainApp(tk.Tk):
         canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
         canvas.bind_all("<Button-4>", lambda e: canvas.yview_scroll(-1, "units"))
         canvas.bind_all("<Button-5>", lambda e: canvas.yview_scroll(1, "units"))
-
-
-def main() -> None:
-    app = MainApp()
-    app.mainloop()
-
-
-if __name__ == "__main__":
-    main()
