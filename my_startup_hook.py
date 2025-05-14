@@ -7,11 +7,11 @@ import os
 # ──────────────────────────────────────────────────────────────────────────────
 # 0) 在冻结（onefile）模式下，强制设置 tcl/tk 的库目录
 # ──────────────────────────────────────────────────────────────────────────────
-if getattr(sys, 'frozen', False):
-    base_path = sys._MEIPASS  # PyInstaller 解压目录
-    # 这两个目录必须跟你的 hook-tkinter.py 里收集的保持一致
-    os.environ['TCL_LIBRARY'] = os.path.join(base_path, 'tcl', 'tcl8.6')
-    os.environ['TK_LIBRARY'] = os.path.join(base_path, 'tcl', 'tk8.6')
+import os, sys, pathlib
+if getattr(sys, 'frozen', False):               # 只在 EXE 中执行
+    base = pathlib.Path(sys._MEIPASS)
+    os.environ['TCL_LIBRARY'] = str(base / 'lib' / 'tcl8.6')
+    os.environ['TK_LIBRARY']  = str(base / 'lib' / 'tk8.6')
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 接下来再导入 tkinter，就会正确在上面两个目录里寻找 init.tcl
