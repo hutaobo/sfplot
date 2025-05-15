@@ -23,11 +23,9 @@ base_path = getattr(sys, '_MEIPASS', os.path.dirname(__file__))
 splash_path = os.path.join(base_path, 'splash.png')
 
 # Create a temporary root window and hide it (this will be the parent for the splash)
-temp_root = tk.Tk()
-temp_root.withdraw()
-
-# Create the splash screen as a Toplevel window (child of temp_root)
-splash_win = tk.Toplevel(temp_root)
+tcl_interp = tk.Tcl()
+tcl_interp.loadtk()  # 加载 Tk 子系统
+splash_win = tk.Toplevel()
 splash_win.overrideredirect(True)  # Remove window decorations (border, title bar)
 
 # Load the splash image
@@ -58,26 +56,12 @@ splash_win.update_idletasks()
 splash_win.deiconify()
 splash_win.update()
 
-# 3) Monkey-patch tk.Tk.__init__ to destroy splash before main application window appears
 _original_tk_init = tk.Tk.__init__
-
-def _new_tk_init(self, *args, **kwargs):
-    """Wrap the Tk.__init__ to destroy the splash screen once the main window is created."""
-    _original_tk_init(self, *args, **kwargs)  # initialize the new Tk (main window)
-    # Now that the main window (root) is created, close the splash screen
-    try:
-        if splash_win is not None:
-            splash_win.destroy()
-    except Exception:
-        pass
-    # Destroy the temporary hidden root as well, since the main app has its own root
-    try:
-        if temp_root is not None:
-            temp_root.destroy()
-    except Exception:
-        pass
-
-tk.Tk.__init__ = _new_tk_init
+tk.Tk.__init__ = lambda self, *a, **k: (
+    _original_tk_init(self, *a, **k),
+    splash_win.destroy(),
+    tcl_interp.destroy()
+)
 
 # 4) (Optional) Global exception and threading exception hooks for logging
 log_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.getcwd()
