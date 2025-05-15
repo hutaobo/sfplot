@@ -3,6 +3,7 @@
 
 import sys
 import os
+import pathlib
 
 # ── 在冻结模式下指向打包后的 Tcl/Tk 脚本 ─────────────────────────────
 if getattr(sys, 'frozen', False):
