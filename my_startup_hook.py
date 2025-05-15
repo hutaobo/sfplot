@@ -4,12 +4,11 @@
 import sys
 import os
 
-# 0) In frozen (PyInstaller) mode, set tcl/tk library paths so tkinter can find init.tcl
+# ── 在冻结模式下指向打包后的 Tcl/Tk 脚本 ─────────────────────────────
 if getattr(sys, 'frozen', False):
-    base_path = getattr(sys, '_MEIPASS', os.path.dirname(__file__))
-    # Adjust these paths if your Tcl/Tk libraries are collected elsewhere in the bundle
-    os.environ['TCL_LIBRARY'] = os.path.join(base_path, 'tcl', 'tcl8.6')
-    os.environ['TK_LIBRARY'] = os.path.join(base_path, 'tcl', 'tk8.6')
+    base = pathlib.Path(sys._MEIPASS)
+    os.environ['TCL_LIBRARY'] = str(base / 'lib' / 'tcl8.6')
+    os.environ['TK_LIBRARY']  = str(base / 'lib' / 'tk8.6')
 
 # 1) Now import tkinter (it will look for init.tcl in the above paths)
 import tkinter as tk
