@@ -126,6 +126,7 @@ def transcript_by_cell_analysis(
     coph_method: str = "average",
     n_jobs: int = 32,
     maxtasks: int = 50,
+    df: pd.DataFrame | None = None,
 ):
     """
     Transcript‑by‑cell 空间分析（共享内存 + 多进程）
@@ -167,7 +168,14 @@ def transcript_by_cell_analysis(
 
     # 5) adata obs & 全局 row‑cophenetic
     adata.obs["x"], adata.obs["y"] = adata.obsm["spatial"][:, 0], adata.obsm["spatial"][:, 1]
-    _adata_obs = adata.obs[["x", "y", "Cluster"]].rename(columns={"Cluster": "celltype"})
+    if df is not None:
+        # Merge annotations with adata.obs
+        adata.obs = adata.obs.merge(df[["cell_id", "group"]], left_on="cell_id", right_on="cell_id", how="left")
+        # Prepare DataFrame with coordinates and group information
+        _adata_obs = adata.obs[["x", "y", "group"]].rename(columns={"group": "celltype"})
+    else:
+        _adata_obs = adata.obs[["x", "y", "Cluster"]].rename(columns={"Cluster": "celltype"})
+
     _row_coph_global, _ = compute_cophenetic_distances_from_df(
         _adata_obs, "x", "y", "celltype", None, coph_method
     )

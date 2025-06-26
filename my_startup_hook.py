@@ -57,11 +57,21 @@ splash_win.deiconify()
 splash_win.update()
 
 _original_tk_init = tk.Tk.__init__
-tk.Tk.__init__ = lambda self, *a, **k: (
-    _original_tk_init(self, *a, **k),
-    splash_win.destroy(),
-    tcl_interp.destroy()
-)
+def _new_tk_init(self, *args, **kwargs):
+    _original_tk_init(self, *args, **kwargs)     # init the main Tk window
+    tk._default_root = self                     # <<< make main window the default root
+    # Now we can safely destroy the splash and temp_root
+    try:
+        if splash_win is not None:
+            splash_win.destroy()
+    except Exception:
+        pass
+    try:
+        tcl_interp.destroy()
+    except Exception:
+        pass
+
+tk.Tk.__init__ = _new_tk_init
 
 # 4) (Optional) Global exception and threading exception hooks for logging
 log_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.getcwd()
