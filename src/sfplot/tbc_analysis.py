@@ -177,7 +177,12 @@ def transcript_by_cell_analysis(
         _adata_obs = adata.obs[["x", "y", "Cluster"]].rename(columns={"Cluster": "celltype"})
 
     _row_coph_global, _ = compute_cophenetic_distances_from_df(
-        _adata_obs, "x", "y", "celltype", None, coph_method
+        df=_adata_obs,
+        x_col="x",
+        y_col="y",
+        celltype_col="celltype",
+        output_dir=None,
+        method=coph_method
     )
     plot_cophenetic_heatmap(
         _row_coph_global, "row_coph", output_folder, f"StructureMap_of_{sample_name}.pdf", sample=sample_name
