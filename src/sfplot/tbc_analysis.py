@@ -108,7 +108,12 @@ def _process_gene(gene: str) -> Optional[pd.DataFrame]:
             ignore_index=True,
         )
         row_coph, _ = compute_cophenetic_distances_from_df(
-            df, "x", "y", "celltype", None, _coph_method
+            df=df,
+            x_col="x",
+            y_col="y",
+            celltype_col="celltype",
+            output_dir=None,
+            method=_coph_method
         )
         series = row_coph.loc[gene].drop(gene, errors="ignore")
         return pd.DataFrame([series.values], index=[gene], columns=series.index)
