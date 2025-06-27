@@ -214,8 +214,9 @@ def transcript_by_cell_analysis(
         )
         # open output file and iterate with progress bar
         with open(out_csv, "w", newline="") as fout:
+            print("Workers initialized, start processing genes ...")
             for df_gene in tqdm(
-                pool.imap_unordered(_process_gene, genes, chunksize=1),
+                pool.imap_unordered(_process_gene, genes, chunksize=10),
                 total=len(genes),
                 desc=f"Processing genes ({sample})",
                 ncols=80,
