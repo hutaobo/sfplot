@@ -6,14 +6,13 @@ tbc_analysis.py  ——  多进程、共享内存、省内存版
   • _process_gene 捕获所有异常，返回 None 不中断
   • chunksize=1 + maxtasksperchild 控制内存峰值
 """
+from __future__ import annotations
 
 import warnings
 import logging
 
 warnings.filterwarnings("ignore")
 logging.basicConfig(level=logging.ERROR)
-
-from __future__ import annotations
 
 import gc
 import logging
