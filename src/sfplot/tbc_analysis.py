@@ -1,24 +1,20 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-tbc_analysis.py  ——  多进程、共享内存、省内存版
-  • 大表 coords → multiprocessing.shared_memory，只占一份物理内存
-  • _process_gene 捕获所有异常，返回 None 不中断
-  • chunksize=1 + maxtasksperchild 控制内存峰值
+tbc_analysis.py — Multiprocess, shared memory, memory-efficient version
+  • shared memory for coords to save physical memory
+  • _process_gene catches exceptions and returns None without interrupting
+  • chunksize=1 + maxtasksperchild controls memory peak
 """
+
 from __future__ import annotations
 
 import warnings
 import logging
-
-warnings.filterwarnings("ignore")
-logging.basicConfig(level=logging.ERROR)
-
-import gc
-import logging
 import os
+import sys
 import traceback
-import warnings
+import gc
 from multiprocessing import Pool, shared_memory
 from typing import Optional
 
@@ -32,77 +28,77 @@ from sfplot import (
 from spatialdata_io import xenium
 from tqdm import tqdm
 
-# ─── Logging & Warnings ──────────────────────────────────────────────
+# global logging and warnings configuration
+warnings.filterwarnings("ignore")
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)-8s %(name)-15s | %(message)s",
+    level=logging.ERROR,
+    format="%(asctime)s %(levelname)-8s %(name)-15s | %(message)s"
 )
+# suppress logs from specific libraries
 for lib in ("sfplot", "spatialdata", "anndata", "seaborn"):
     logging.getLogger(lib).setLevel(logging.ERROR)
-warnings.filterwarnings("ignore", category=FutureWarning)
-warnings.filterwarnings("ignore", category=UserWarning)
-warnings.filterwarnings("ignore", message=".*uncondensed distance matrix.*")
 
-# ─── Globals visible *inside workers*  ───────────────────────────────
-_adata_obs: Optional[pd.DataFrame]       = None     # small
-_row_coph_global: Optional[pd.DataFrame] = None     # small
-_coords_global: Optional[pd.DataFrame]   = None     # shared‑mem view
-_coph_method: str                        = "average"
-_shm: Optional[shared_memory.SharedMemory] = None   # keep handle alive
+# Globals visible inside worker processes
+_adata_obs: Optional[pd.DataFrame] = None
+_row_coph_global: Optional[pd.DataFrame] = None
+_coords_global: Optional[pd.DataFrame] = None
+_coph_method: str = "average"
+_shm: Optional[shared_memory.SharedMemory] = None
 
-# -------------------------------------------------------------------- #
-def _init_worker(shm_name, shm_shape, shm_dtype,
-                 adata_obs_df, row_coph_df, coph_method: str):
+
+def _init_worker(shm_name, shm_shape, shm_dtype, adata_obs_df, row_coph_df, coph_method: str):
     """
-    Attach to existing shared‑memory block and rebuild coords DataFrame.
+    Attach to existing shared memory block and rebuild coords DataFrame.
     """
     global _coords_global, _adata_obs, _row_coph_global, _coph_method, _shm
 
-    # 1) attach
+    # attach to the shared memory segment
     _shm = shared_memory.SharedMemory(name=shm_name)
-    arr  = np.ndarray(shm_shape, dtype=shm_dtype, buffer=_shm.buf)
+    arr = np.ndarray(shm_shape, dtype=shm_dtype, buffer=_shm.buf)
 
-    # 2) rebuild DataFrame (zero‑copy)
+    # rebuild DataFrame without copying
     _coords_global = pd.DataFrame.from_records(
         arr, columns=["x", "y", "feature_name"]
     )
+    # ensure feature_name is string type
     _coords_global["feature_name"] = _coords_global["feature_name"].astype(str)
-    _coords_global.flags.writeable = False   # just for safety
+    _coords_global.flags.writeable = False
 
-    # 3) small globals sent via pickle
-    _adata_obs       = adata_obs_df
+    # set small globals from parent
+    _adata_obs = adata_obs_df
     _row_coph_global = row_coph_df
-    _coph_method     = coph_method
+    _coph_method = coph_method
 
     logging.info(
         f"Worker {os.getpid()} ready: coords={len(_coords_global):,}, "
-        f"genes={len(_row_coph_global)}"
+        f"celltypes={len(_row_coph_global)}"
     )
 
-# -------------------------------------------------------------------- #
+
 def _process_gene(gene: str) -> Optional[pd.DataFrame]:
-    """Return one‑row DataFrame or None if failure/empty."""
+    """Return one-row DataFrame of cophenetic distances for a gene, or None if failure/empty."""
     if _coords_global is None:
         logging.error("Globals not initialised in worker")
         return None
     try:
+        # select transcripts for this gene
         sub = _coords_global[_coords_global["feature_name"] == gene]
 
-        # case ①: gene 无空间坐标
+        # case 1: no spatial coordinates for gene
         if sub.empty:
             if gene not in _row_coph_global.index:
-                empty_cols = [
-                    col for col in _row_coph_global.columns if col != gene
-                ]
+                # build empty row if gene not in initial distances
+                empty_cols = [col for col in _row_coph_global.columns if col != gene]
                 return pd.DataFrame(
                     [[np.nan] * len(empty_cols)],
                     index=[gene],
                     columns=empty_cols,
                 )
+            # return global cophenetic row for gene
             row = _row_coph_global.loc[gene].drop(labels=gene, errors="ignore")
             return pd.DataFrame([row.values], index=[gene], columns=row.index)
 
-        # case ②: 正常计算一行 cophenetic
+        # case 2: compute cophenetic distances for gene-transcripts
         df = pd.concat(
             [
                 _adata_obs,
@@ -124,37 +120,32 @@ def _process_gene(gene: str) -> Optional[pd.DataFrame]:
         return pd.DataFrame([series.values], index=[gene], columns=series.index)
 
     except Exception as err:
+        # catch and log any error without interrupting
         logging.error(f"Worker failed on gene {gene}: {err}")
         logging.error(traceback.format_exc())
         return None
 
-# -------------------------------------------------------------------- #
+
 def transcript_by_cell_analysis(
     folder: str,
-    sample_name: str | None = None,
-    output_folder: str | None = None,
+    sample_name: Optional[str] = None,
+    output_folder: Optional[str] = None,
     coph_method: str = "average",
     n_jobs: int = 32,
     maxtasks: int = 50,
-    df: pd.DataFrame | None = None,
+    df: Optional[pd.DataFrame] = None,
 ):
     """
-    Transcript‑by‑cell 空间分析（共享内存 + 多进程）
+    Perform transcript-by-cell spatial analysis using shared memory and multiprocessing.
     """
-    import warnings
-    import logging
-
-    warnings.filterwarnings("ignore")
-    logging.basicConfig(level=logging.ERROR)
-
     global _adata_obs, _row_coph_global
 
-    # 1) 路径与输出
-    sample_name  = sample_name or os.path.basename(os.path.normpath(folder))
-    output_folder = output_folder or f"./t_by_c_{sample_name}"
-    os.makedirs(output_folder, exist_ok=True)
+    # prepare output directory
+    sample = sample_name or os.path.basename(os.path.normpath(folder))
+    out_dir = output_folder or f"./t_by_c_{sample}"
+    os.makedirs(out_dir, exist_ok=True)
 
-    # 2) 读取数据
+    # load Xenium data and transcripts
     adata = load_xenium_data(folder, normalize=False)
     sdata = xenium(
         folder,
@@ -165,7 +156,7 @@ def transcript_by_cell_analysis(
         aligned_images=False, cells_table=False,
     )
 
-    # 3) 过滤转录本
+    # filter transcripts and convert feature_name to string
     coords = sdata.points["transcripts"]
     try:
         coords = coords.compute()
@@ -177,21 +168,21 @@ def transcript_by_cell_analysis(
         ["x", "y", "feature_name", "cell_id"],
     ]
 
-    # 4) 构建共享内存 (coords 只要 x,y,gene)
+    # create shared memory block for transcript coords
     coords_arr = coords[["x", "y", "feature_name"]].to_records(index=False)
     shm = shared_memory.SharedMemory(create=True, size=coords_arr.nbytes)
     np.ndarray(coords_arr.shape, coords_arr.dtype, buffer=shm.buf)[:] = coords_arr
 
-    # 5) adata obs & 全局 row‑cophenetic
-    adata.obs["x"], adata.obs["y"] = adata.obsm["spatial"][:, 0], adata.obsm["spatial"][:, 1]
+    # prepare cell coordinates and celltype annotations
+    adata.obs["x"] = adata.obsm["spatial"][:, 0]
+    adata.obs["y"] = adata.obsm["spatial"][:, 1]
     if df is not None:
-        # Merge annotations with adata.obs
-        adata.obs = adata.obs.merge(df[["cell_id", "group"]], left_on="cell_id", right_on="cell_id", how="left")
-        # Prepare DataFrame with coordinates and group information
+        adata.obs = adata.obs.merge(df[["cell_id", "group"]], on="cell_id", how="left")
         _adata_obs = adata.obs[["x", "y", "group"]].rename(columns={"group": "celltype"})
     else:
         _adata_obs = adata.obs[["x", "y", "Cluster"]].rename(columns={"Cluster": "celltype"})
 
+    # compute initial cophenetic distances between cell types
     _row_coph_global, _ = compute_cophenetic_distances_from_df(
         df=_adata_obs,
         x_col="x",
@@ -201,44 +192,58 @@ def transcript_by_cell_analysis(
         method=coph_method
     )
     plot_cophenetic_heatmap(
-        _row_coph_global, "row_coph", output_folder, f"StructureMap_of_{sample_name}.pdf", sample=sample_name
+        _row_coph_global, "row_coph", out_dir, f"StructureMap_of_{sample}.pdf", sample=sample
     )
-    _row_coph_global.to_csv(f"{output_folder}/StructureMap_table_{sample_name}.csv")
+    _row_coph_global.to_csv(f"{out_dir}/StructureMap_table_{sample}.csv")
 
-    # 6) 并行处理基因
+    # parallel processing of genes
     genes = list(adata.var.index)
-    out_csv = f"{output_folder}/t_and_c_result_{sample_name}.csv"
-    header_flag = [True]
+    out_csv = f"{out_dir}/t_and_c_result_{sample}.csv"
+    header_written = False
 
-    with open(out_csv, "w", newline="") as fout, Pool(
-        processes=n_jobs,
-        initializer=_init_worker,
-        initargs=(
-            shm.name, coords_arr.shape, coords_arr.dtype,
-            _adata_obs, _row_coph_global, coph_method,
-        ),
-        maxtasksperchild=maxtasks,
-    ) as pool:
-        for df_gene in tqdm(
-            pool.imap_unordered(_process_gene, genes, chunksize=1),
-            total=len(genes),
-            desc="Processing genes",
-            ncols=80,
-        ):
-            if df_gene is None:
-                continue
-            df_gene.to_csv(fout, header=header_flag[0], index=True)
-            header_flag[0] = False
-            del df_gene
-            gc.collect()
+    try:
+        # initialize process pool
+        pool = Pool(
+            processes=n_jobs,
+            initializer=_init_worker,
+            initargs=(
+                shm.name, coords_arr.shape, coords_arr.dtype,
+                _adata_obs, _row_coph_global, coph_method
+            ),
+            maxtasksperchild=maxtasks
+        )
+        # open output file and iterate with progress bar
+        with open(out_csv, "w", newline="") as fout:
+            for df_gene in tqdm(
+                pool.imap_unordered(_process_gene, genes, chunksize=1),
+                total=len(genes),
+                desc=f"Processing genes ({sample})",
+                ncols=80,
+                file=sys.stdout,
+                mininterval=1.0,
+            ):
+                if df_gene is None:
+                    continue
+                df_gene.to_csv(fout, header=not header_written, index=True)
+                header_written = True
+                del df_gene
+                gc.collect()
+    finally:
+        # clean up pool and shared memory
+        try:
+            pool.close()
+            pool.join()
+        except Exception:
+            pass
+        shm.close()
+        try:
+            shm.unlink()
+        except FileNotFoundError:
+            pass
 
-    # 7) 清理共享内存
-    shm.close()
-    shm.unlink()
+    print(f"[DONE] Outputs saved to: {out_dir}")
 
-    print(f"[DONE] Outputs saved to: {output_folder}")
 
-# -------------------------------------------------------------------- #
-if __name__ == "__main__":   # 简单 CLI demo
+if __name__ == "__main__":
     import sys
     transcript_by_cell_analysis(sys.argv[1] if len(sys.argv) > 1 else ".")
