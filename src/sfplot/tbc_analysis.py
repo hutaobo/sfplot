@@ -215,8 +215,11 @@ def transcript_by_cell_analysis(
         # open output file and iterate with progress bar
         with open(out_csv, "w", newline="") as fout:
             print("Workers initialized, start processing genes ...")
+            # compute chunksize for fewer dispatch calls
+            chunks = max(1, len(genes) // (n_jobs * 2))
+            iterable = pool.imap_unordered(_process_gene, genes, chunksize=chunks)
             for df_gene in tqdm(
-                pool.imap_unordered(_process_gene, genes, chunksize=10),
+                iterable,
                 total=len(genes),
                 desc=f"Processing genes ({sample})",
                 ncols=80,
