@@ -7,6 +7,12 @@ tbc_analysis.py  ——  多进程、共享内存、省内存版
   • chunksize=1 + maxtasksperchild 控制内存峰值
 """
 
+import warnings
+import logging
+
+warnings.filterwarnings("ignore")
+logging.basicConfig(level=logging.ERROR)
+
 from __future__ import annotations
 
 import gc
@@ -136,6 +142,12 @@ def transcript_by_cell_analysis(
     """
     Transcript‑by‑cell 空间分析（共享内存 + 多进程）
     """
+    import warnings
+    import logging
+
+    warnings.filterwarnings("ignore")
+    logging.basicConfig(level=logging.ERROR)
+
     global _adata_obs, _row_coph_global
 
     # 1) 路径与输出
