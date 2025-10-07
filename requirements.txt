@@ -1,6 +1,7 @@
 rich
 numpy
 pandas
+pycirclize
 scikit-learn
 matplotlib
 seaborn
