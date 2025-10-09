@@ -6,7 +6,10 @@ __email__ = "taobo.hu@scilifelab.se"
 # ---- public APIs (functions) ----
 from .circle_heatmap import circle_heatmap
 from .compute_col_dendrogram_scores import compute_col_dendrogram_scores
-from .compute_cophenetic_distances_from_df_memory_opt import compute_cophenetic_distances_from_df_memory_opt
+from .compute_cophenetic_distances_from_df_memory_opt import (
+    compute_cophenetic_distances_from_df_memory_opt,
+    pick_batch_size,
+)
 from .Searcher_Findee_Score import (
     compute_cophenetic_distances_from_adata,
     compute_cophenetic_distances_from_df,
@@ -33,6 +36,7 @@ __all__ = [
     "compute_col_dendrogram_scores",
     "compute_cophenetic_distances_from_adata",
     "compute_cophenetic_distances_from_df",
+    "compute_cophenetic_distances_from_df_memory_opt",
     "plot_cophenetic_heatmap",
     "generate_TCR_distance_heatmap_from_df",
     "generate_cluster_distance_heatmap_from_adata",

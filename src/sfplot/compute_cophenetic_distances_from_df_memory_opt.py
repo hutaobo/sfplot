@@ -4,6 +4,26 @@ from scipy.spatial.distance import pdist, squareform
 from sklearn.neighbors import NearestNeighbors
 import pandas as pd
 import numpy as np
+import psutil
+
+
+def pick_batch_size(n_cells: int, dims: int = 2, frac: float = 0.15,
+                    hard_min: int = 10_000, hard_max: int = 300_000) -> int:
+    """
+    Choose a conservative batch_size based on available RAM.
+    - dims: 2 or 3; higher dims may trigger a bit more copying internally.
+    - frac: fraction of available RAM to budget for the temporary arrays.
+    - Returns an int in [hard_min, hard_max].
+    """
+    avail = psutil.virtual_memory().available  # bytes
+    # rough bytes/row upper bound (dist + indices + possible coord copy + overhead)
+    bytes_per_row = 64 if dims >= 2 else 48
+    target = int((avail * frac) // bytes_per_row)
+    # clamp
+    bsz = max(hard_min, min(hard_max, target))
+    # never exceed total n_cells
+    return min(bsz, n_cells)
+
 
 def compute_cophenetic_distances_from_df_memory_opt(
     df: pd.DataFrame,
