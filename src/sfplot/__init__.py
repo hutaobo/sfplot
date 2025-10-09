@@ -6,6 +6,7 @@ __email__ = "taobo.hu@scilifelab.se"
 # ---- public APIs (functions) ----
 from .circle_heatmap import circle_heatmap
 from .compute_col_dendrogram_scores import compute_col_dendrogram_scores
+from .compute_cophenetic_distances_from_df_memory_opt import compute_cophenetic_distances_from_df_memory_opt
 from .Searcher_Findee_Score import (
     compute_cophenetic_distances_from_adata,
     compute_cophenetic_distances_from_df,
