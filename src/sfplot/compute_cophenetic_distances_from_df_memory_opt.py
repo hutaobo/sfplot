@@ -4,24 +4,84 @@ from scipy.spatial.distance import pdist, squareform
 from sklearn.neighbors import NearestNeighbors
 import pandas as pd
 import numpy as np
+import math
+import os
 import psutil
 
 
-def pick_batch_size(n_cells: int, dims: int = 2, frac: float = 0.15,
-                    hard_min: int = 10_000, hard_max: int = 300_000) -> int:
+def pick_batch_size(
+    n_cells: int,
+    dims: int = 2,
+    frac: float = 0.30,
+    hard_min: int = 50_000,
+    hard_max: int | None = None,
+    bytes_per_row: int | None = None,
+    safety_gb: float = 8.0,
+    env_override_var: str = "BATCH_SIZE_OVERRIDE",
+) -> int:
     """
-    Choose a conservative batch_size based on available RAM.
-    - dims: 2 or 3; higher dims may trigger a bit more copying internally.
-    - frac: fraction of available RAM to budget for the temporary arrays.
-    - Returns an int in [hard_min, hard_max].
+    Pick a batch size that better utilizes RAM on big machines.
+
+    Key ideas:
+    - Allow an env override (for quick experiments).
+    - Subtract a fixed safety buffer (safety_gb) from available RAM.
+    - Make bytes_per_row configurable; provide a conservative default.
+    - Optional hard_max; if None, we don't clamp by a hard cap.
+
+    Parameters
+    ----------
+    n_cells : int
+        Total number of items to process.
+    dims : int
+        Dimensionality; may influence copies inside algorithms.
+    frac : float
+        Fraction of *available* RAM to budget.
+    hard_min : int
+        Lower bound for stability on small RAM.
+    hard_max : Optional[int]
+        Upper bound; set None to disable hard clamping.
+    bytes_per_row : Optional[int]
+        Estimated peak bytes per row for the step. If None, pick a conservative default.
+    safety_gb : float
+        Keep this amount of RAM free regardless (OS/page cache/etc.).
+    env_override_var : str
+        If set, this env var forces the batch size (int), bypassing heuristics.
+
+    Returns
+    -------
+    int
+        A batch size in [hard_min, n_cells] (and <= hard_max if provided).
     """
-    avail = psutil.virtual_memory().available  # bytes
-    # rough bytes/row upper bound (dist + indices + possible coord copy + overhead)
-    bytes_per_row = 64 if dims >= 2 else 48
-    target = int((avail * frac) // bytes_per_row)
-    # clamp
-    bsz = max(hard_min, min(hard_max, target))
-    # never exceed total n_cells
+    # 0) environment override for quick control
+    ov = os.environ.get(env_override_var)
+    if ov:
+        try:
+            forced = int(ov)
+            return max(hard_min, min(n_cells, forced))
+        except ValueError:
+            pass  # ignore bad value
+
+    # 1) available RAM minus a safety buffer
+    avail = psutil.virtual_memory().available
+    safety = int(max(0, safety_gb) * (1024**3))
+    usable = max(0, avail - safety)
+
+    # 2) fraction of usable
+    budget = int(usable * max(0.05, min(frac, 0.95)))  # clamp frac to [5%,95%]
+
+    # 3) estimate bytes/row
+    if bytes_per_row is None:
+        # Slightly more generous than 64 to cover index arrays/temporary buffers
+        bytes_per_row = 64 if dims <= 2 else 80
+
+    # 4) target rows from memory budget
+    target = 1 if bytes_per_row <= 0 else budget // bytes_per_row
+
+    # 5) apply clamps
+    bsz = max(hard_min, int(target))
+    if hard_max is not None:
+        bsz = min(bsz, hard_max)
+
     return min(bsz, n_cells)
 
 
