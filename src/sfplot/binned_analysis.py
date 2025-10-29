@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.spatial.distance import cdist
 
+
 def calculate_gene_distance_matrix_ewnn(expression: pd.DataFrame, coordinates: pd.DataFrame, threshold: float = 0.0) -> pd.DataFrame:
     """
     基于表达加权最近邻计算基因间有向距离矩阵 (EWNN 方法)。

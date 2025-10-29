@@ -25,6 +25,11 @@ from .data_processing import load_xenium_data
 from .sfplot import split_B_by_distance_to_A
 from .tbc_analysis import transcript_by_cell_analysis
 from .tbc_analysis_serial import transcript_by_cell_analysis_serial
+from .binned_analysis import (
+    compute_cophenetic_distances_from_group_mean_matrix,
+    calculate_gene_distance_matrix_wmda,
+    calculate_gene_distance_matrix_ewnn,
+)
 
 # ---- expose submodule so `sfplot.circular_dendrogram.*` works ----
 from . import circular_dendrogram
