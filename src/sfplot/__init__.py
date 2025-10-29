@@ -37,11 +37,14 @@ from .circular_dendrogram import plot_circular_dendrogram_pycirclize
 
 __all__ = [
     # functions
+    "calculate_gene_distance_matrix_ewnn",
+    "calculate_gene_distance_matrix_wmda",
     "circle_heatmap",
     "compute_col_dendrogram_scores",
     "compute_cophenetic_distances_from_adata",
     "compute_cophenetic_distances_from_df",
     "compute_cophenetic_distances_from_df_memory_opt",
+    "compute_cophenetic_distances_from_group_mean_matrix",
     "plot_cophenetic_heatmap",
     "generate_TCR_distance_heatmap_from_df",
     "generate_cluster_distance_heatmap_from_adata",
