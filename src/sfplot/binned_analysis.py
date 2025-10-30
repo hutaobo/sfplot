@@ -3,56 +3,65 @@ import pandas as pd
 from scipy.spatial.distance import cdist
 
 
-def calculate_gene_distance_matrix_ewnn(expression: pd.DataFrame, coordinates: pd.DataFrame, threshold: float = 0.0) -> pd.DataFrame:
+def calculate_gene_distance_matrix_ewnn(expression: pd.DataFrame,
+                                       coordinates: pd.DataFrame,
+                                       threshold: float = 0.0,
+                                       z: Optional[pd.Series] = None) -> pd.DataFrame:
     """
     基于表达加权最近邻计算基因间有向距离矩阵 (EWNN 方法)。
-    参数:
-        expression: 行索引为spot、列索引为gene的 DataFrame，值为表达量。
-        coordinates: 行索引为spot、列为 ['x','y'] 的 DataFrame，对应每个spot的空间坐标。
-        threshold: 表达阈值，只有表达量大于此值的spot才视为基因有表达 (默认0，即只要>0皆算)。
-    返回:
-        DataFrame，索引和列均为基因名，元素 D(i->j) 为基因 i 到 基因 j 的加权最近邻距离。
+    新增参数:
+        z: 可选，长度与coordinates相同的数组或Series，表示每个spot的z坐标。
+    其余参数与返回值同原函数。
     """
     genes = expression.columns
     dist_matrix = pd.DataFrame(np.nan, index=genes, columns=genes)
-    # 预先计算每个基因的有效spot布尔索引，避免重复计算
+    # 预先计算每个基因的有效spot布尔索引
     gene_spots = {gene: expression[gene].values > threshold for gene in genes}
-    coords_arr = coordinates.values  # 转为 numpy 数组加速计算
-    for i, gene_i in enumerate(genes):
+    # 构造坐标数组 (加入z列如果提供)
+    if z is not None:
+        coords_arr = np.hstack([coordinates.values, np.array(z).reshape(-1, 1)])
+    else:
+        coords_arr = coordinates.values
+    # 计算有向距离矩阵
+    for gene_i in genes:
         mask_i = gene_spots[gene_i]
         if not mask_i.any():
-            continue  # 基因i无表达
-        coords_i = coords_arr[mask_i]                         # 基因i表达的坐标
-        weights_i = expression.loc[mask_i, gene_i].values     # 基因i在这些坐标的表达量
+            continue  # 基因 i 无表达点，整行保持 NaN
+        coords_i = coords_arr[mask_i]                        # 基因 i 表达的坐标集合
+        weights_i = expression.loc[mask_i, gene_i].values    # 基因 i 在这些坐标的表达量（权重）
         for gene_j in genes:
             mask_j = gene_spots[gene_j]
             if not mask_j.any():
-                dist_matrix.loc[gene_i, gene_j] = np.nan      # 基因j无表达
+                dist_matrix.loc[gene_i, gene_j] = np.nan     # 基因 j 无表达点
             else:
                 coords_j = coords_arr[mask_j]
-                # 计算i表达坐标到j表达坐标的距离矩阵，并取每行最小值 (最近邻)
-                dists = cdist(coords_i, coords_j, metric='euclidean')  # SciPy距离计算
-                min_dists = dists.min(axis=1)                         # 对每个i点，最近j距离
-                # 按基因i表达量加权平均
+                # 计算 i 表达坐标到 j 表达坐标的距离矩阵，并取每行最小值 (最近邻距离)
+                dists = cdist(coords_i, coords_j, metric='euclidean')
+                min_dists = dists.min(axis=1)                # 每个 i 点距离最近的一个 j 点
+                # 对这些最近距离按基因 i 的表达量加权平均
                 avg_dist = np.average(min_dists, weights=weights_i)
                 dist_matrix.loc[gene_i, gene_j] = avg_dist
     return dist_matrix
 
 
-def calculate_gene_distance_matrix_wmda(expression: pd.DataFrame, coordinates: pd.DataFrame, threshold: float = 0.0) -> pd.DataFrame:
+def calculate_gene_distance_matrix_wmda(expression: pd.DataFrame,
+                                       coordinates: pd.DataFrame,
+                                       threshold: float = 0.0,
+                                       z: Optional[pd.Series] = None) -> pd.DataFrame:
     """
     基于表达分布质心计算基因间有向距离矩阵 (WMDA 方法)。
-    参数:
-        expression: [n_spots × n_genes] 的表达矩阵 DataFrame。
-        coordinates: [n_spots × 2] 的坐标 DataFrame，含 'x','y' 列。
-        threshold: 表达阈值，只有表达量大于此值的spot才计入计算。
-    返回:
-        DataFrame，索引和列为基因名，元素 D(i->j) 为基因 i 到 基因 j 的质心距离 (加权平均)。
+    新增参数:
+        z: 可选，长度与coordinates相同的数组或Series，表示每个spot的z坐标。
+    其余参数与返回值同原函数。
     """
     genes = expression.columns
     dist_matrix = pd.DataFrame(np.nan, index=genes, columns=genes)
-    coords_arr = coordinates.values
-    # 预先计算每个基因的质心坐标
+    # 构造坐标数组 (加入z列如果提供)
+    if z is not None:
+        coords_arr = np.hstack([coordinates.values, np.array(z).reshape(-1, 1)])
+    else:
+        coords_arr = coordinates.values
+    # 预计算每个基因的加权质心坐标
     centers = {}
     for gene in genes:
         mask = expression[gene].values > threshold
@@ -61,15 +70,18 @@ def calculate_gene_distance_matrix_wmda(expression: pd.DataFrame, coordinates: p
         else:
             sub_coords = coords_arr[mask]
             sub_expr = expression.loc[mask, gene].values
-            # 计算加权质心
-            cx = np.average(sub_coords[:,0], weights=sub_expr)
-            cy = np.average(sub_coords[:,1], weights=sub_expr)
-            centers[gene] = (cx, cy)
-    # 计算有向距离
+            cx = np.average(sub_coords[:, 0], weights=sub_expr)
+            cy = np.average(sub_coords[:, 1], weights=sub_expr)
+            if z is not None:
+                cz = np.average(sub_coords[:, 2], weights=sub_expr)
+                centers[gene] = (cx, cy, cz)
+            else:
+                centers[gene] = (cx, cy)
+    # 计算有向距离矩阵
     for gene_i in genes:
         mask_i = expression[gene_i].values > threshold
         if not mask_i.any():
-            continue
+            continue  # 基因 i 无表达
         sub_coords_i = coords_arr[mask_i]
         sub_expr_i = expression.loc[mask_i, gene_i].values
         for gene_j in genes:
@@ -77,8 +89,9 @@ def calculate_gene_distance_matrix_wmda(expression: pd.DataFrame, coordinates: p
             if center_j is None:
                 dist_matrix.loc[gene_i, gene_j] = np.nan
             else:
-                # 计算i的每个点到j质心的距离，再按i表达加权
-                dists = np.linalg.norm(sub_coords_i - np.array(center_j), axis=1)
+                # 计算基因 i 每个表达点到基因 j 质心的距离，并加权平均
+                center_arr = np.array(center_j)  # shape (2,) 或 (3,)
+                dists = np.linalg.norm(sub_coords_i - center_arr, axis=1)
                 avg_dist = np.average(dists, weights=sub_expr_i)
                 dist_matrix.loc[gene_i, gene_j] = avg_dist
     return dist_matrix
