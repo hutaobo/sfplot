@@ -1,70 +1,145 @@
 import numpy as np
 import pandas as pd
-from scipy.spatial.distance import cdist
 from typing import Optional
 from typing import Optional, Tuple
 from scipy.cluster.hierarchy import linkage, cophenet
-from scipy.spatial.distance import pdist, squareform
+from scipy.spatial.distance import cdist, pdist, squareform
+from sklearn.neighbors import NearestNeighbors
 
 
 def calculate_gene_distance_matrix_ewnn(expression: pd.DataFrame,
                                        coordinates: pd.DataFrame,
                                        threshold: float = 0.0,
-                                       z: Optional[pd.Series] = None) -> pd.DataFrame:
+                                       z: Optional[pd.Series] = None,
+                                       memory_limit_gb: float = 300.0,
+                                       batch_size: Optional[int] = None) -> pd.DataFrame:
     """
-    基于表达加权最近邻计算基因间有向距离矩阵 (EWNN 方法)。
+    基于表达加权最近邻计算基因间有向距离矩阵 (EWNN 方法)的内存优化版本。
+    通过分块计算降低内存占用，避免在大规模矩阵计算时出现 MemoryError。
+
     新增参数:
-        z: 可选，长度与coordinates相同的数组或Series，表示每个spot的z坐标。
+        memory_limit_gb: float, 默认 300.0
+            内存使用上限 (GB)。当预计最终距离矩阵所需内存超过该值时，
+            将采用磁盘内存映射文件暂存结果，避免占用过多内存。
+        batch_size: Optional[int], 默认 None
+            最近邻查询的批大小。如为 None，则根据可用内存自动选择批大小；
+            如指定具体数值，则按该批大小分批查询邻近距离。
     其余参数与返回值同原函数。
     """
-    genes = expression.columns
-    dist_matrix = pd.DataFrame(np.nan, index=genes, columns=genes)
-    # 预先计算每个基因的有效spot布尔索引
-    gene_spots = {gene: expression[gene].values > threshold for gene in genes}
-    # 构造坐标数组 (加入z列如果提供)
-    if z is not None:
-        coords_arr = np.hstack([coordinates.values, np.array(z).reshape(-1, 1)])
+    genes = list(expression.columns)
+    n_genes = len(genes)
+    # 根据基因数估算最终距离矩阵大小，决定是否使用磁盘临时存储
+    total_bytes = n_genes * n_genes * 8  # float64 每个元素8字节
+    memory_limit_bytes = memory_limit_gb * (1024 ** 3)
+    use_memmap = total_bytes > memory_limit_bytes
+
+    if use_memmap:
+        # 创建临时内存映射文件用于存储结果矩阵
+        import tempfile
+        tmp = tempfile.NamedTemporaryFile(prefix="gene_dist_ewnn_", suffix=".dat", delete=False)
+        tmp_filename = tmp.name
+        tmp.close()
+        dist_matrix_arr = np.memmap(tmp_filename, dtype='float64', mode='w+', shape=(n_genes, n_genes))
+        dist_matrix_arr[:] = np.nan  # 初始填充 NaN
     else:
-        coords_arr = coordinates.values
-    # 计算有向距离矩阵
-    for gene_i in genes:
-        mask_i = gene_spots[gene_i]
-        if not mask_i.any():
-            continue  # 基因 i 无表达点，整行保持 NaN
-        coords_i = coords_arr[mask_i]                        # 基因 i 表达的坐标集合
-        weights_i = expression.loc[mask_i, gene_i].values    # 基因 i 在这些坐标的表达量（权重）
-        for gene_j in genes:
-            mask_j = gene_spots[gene_j]
-            if not mask_j.any():
-                dist_matrix.loc[gene_i, gene_j] = np.nan     # 基因 j 无表达点
-            else:
-                coords_j = coords_arr[mask_j]
-                # 计算 i 表达坐标到 j 表达坐标的距离矩阵，并取每行最小值 (最近邻距离)
-                dists = cdist(coords_i, coords_j, metric='euclidean')
-                min_dists = dists.min(axis=1)                # 每个 i 点距离最近的一个 j 点
-                # 对这些最近距离按基因 i 的表达量加权平均
-                avg_dist = np.average(min_dists, weights=weights_i)
-                dist_matrix.loc[gene_i, gene_j] = avg_dist
-    return dist_matrix
+        # 在内存中初始化结果矩阵
+        dist_matrix_arr = np.full((n_genes, n_genes), np.nan, dtype=np.float64)
+
+    # 预先计算每个基因的有效表达掩码，提升重复使用效率
+    gene_masks = {gene: (expression[gene].values > threshold) for gene in genes}
+    # 可选：预存每个基因的表达值数组以加速索引
+    gene_expr_values = {gene: expression[gene].values for gene in genes}
+
+    # 构造坐标矩阵 (如果提供了 z 坐标则一并包含)
+    coords = coordinates.values
+    if z is not None:
+        coords = np.hstack([coords, np.asarray(z).reshape(-1, 1)])
+    n_spots = coords.shape[0]
+
+    # 确定批大小：如未指定则自动估算
+    if batch_size is None:
+        try:
+            # 尝试利用已有工具按内存情况选取批大小
+            from sfplot.compute_cophenetic_distances_from_df_memory_opt import pick_batch_size
+            batch = pick_batch_size(n_cells=n_spots, dims=coords.shape[1])
+        except ImportError:
+            batch = n_spots  # 无法导入则不分批
+    else:
+        batch = min(batch_size, n_spots)
+
+    # 逐个目标基因计算距离列（“Findee”方向），按需分批查询最近邻
+    for j_idx, gene_j in enumerate(genes):
+        mask_j = gene_masks[gene_j]
+        if not mask_j.any():
+            continue  # 基因 j 无表达，整列保持 NaN
+
+        # 构建基因 j 表达坐标的 1-近邻搜索模型
+        coords_j = coords[mask_j]
+        nbrs = NearestNeighbors(n_neighbors=1, algorithm='auto').fit(coords_j)
+
+        # 计算所有样本点到当前基因 j 表达点集的最近邻距离，可分批执行
+        if batch >= n_spots:
+            # 单批次直接查询所有点
+            dist_all, _ = nbrs.kneighbors(coords)
+            dist_all = dist_all[:, 0]  # 提取最近邻距离
+        else:
+            # 分批查询以降低内存峰值
+            dist_all = np.empty(n_spots, dtype=np.float64)
+            for start in range(0, n_spots, batch):
+                end = min(n_spots, start + batch)
+                dist_batch, _ = nbrs.kneighbors(coords[start:end])
+                dist_all[start:end] = dist_batch[:, 0]
+
+        # 利用预计算的距离数组和表达权重，计算各源基因到基因 j 的加权平均最近邻距离
+        for i_idx, gene_i in enumerate(genes):
+            mask_i = gene_masks[gene_i]
+            if not mask_i.any():
+                continue  # 基因 i 无表达，整行保持 NaN
+            # 提取基因 i 在表达位置的距离和权重
+            dists_i = dist_all[mask_i]
+            weights_i = gene_expr_values[gene_i][mask_i]
+            # 计算加权平均距离
+            dist_matrix_arr[i_idx, j_idx] = np.average(dists_i, weights=weights_i)
+
+    # 将结果转换为 DataFrame 返回，索引/列与输入基因顺序一致
+    dist_matrix_df = pd.DataFrame(dist_matrix_arr, index=genes, columns=genes)
+    return dist_matrix_df
 
 
 def calculate_gene_distance_matrix_wmda(expression: pd.DataFrame,
                                        coordinates: pd.DataFrame,
                                        threshold: float = 0.0,
-                                       z: Optional[pd.Series] = None) -> pd.DataFrame:
+                                       z: Optional[pd.Series] = None,
+                                       memory_limit_gb: float = 300.0) -> pd.DataFrame:
     """
-    基于表达分布质心计算基因间有向距离矩阵 (WMDA 方法)。
+    基于表达分布质心计算基因间有向距离矩阵 (WMDA 方法)的内存优化版本。
+    通过分块计算和必要的临时存储降低内存占用。
+
     新增参数:
-        z: 可选，长度与coordinates相同的数组或Series，表示每个spot的z坐标。
+        memory_limit_gb: float, 默认 300.0
+            内存使用上限 (GB)。当预计输出矩阵过大时，将使用磁盘内存映射文件暂存结果，避免内存不足。
     其余参数与返回值同原函数。
     """
-    genes = expression.columns
-    dist_matrix = pd.DataFrame(np.nan, index=genes, columns=genes)
-    # 构造坐标数组 (加入z列如果提供)
-    if z is not None:
-        coords_arr = np.hstack([coordinates.values, np.array(z).reshape(-1, 1)])
+    genes = list(expression.columns)
+    n_genes = len(genes)
+    total_bytes = n_genes * n_genes * 8
+    memory_limit_bytes = memory_limit_gb * (1024 ** 3)
+    use_memmap = total_bytes > memory_limit_bytes
+
+    if use_memmap:
+        import tempfile
+        tmp = tempfile.NamedTemporaryFile(prefix="gene_dist_wmda_", suffix=".dat", delete=False)
+        tmp_filename = tmp.name
+        tmp.close()
+        dist_matrix_arr = np.memmap(tmp_filename, dtype='float64', mode='w+', shape=(n_genes, n_genes))
+        dist_matrix_arr[:] = np.nan
     else:
-        coords_arr = coordinates.values
+        dist_matrix_arr = np.full((n_genes, n_genes), np.nan, dtype=np.float64)
+
+    coords = coordinates.values
+    if z is not None:
+        coords = np.hstack([coords, np.asarray(z).reshape(-1, 1)])
+
     # 预计算每个基因的加权质心坐标
     centers = {}
     for gene in genes:
@@ -72,33 +147,37 @@ def calculate_gene_distance_matrix_wmda(expression: pd.DataFrame,
         if not mask.any():
             centers[gene] = None
         else:
-            sub_coords = coords_arr[mask]
+            sub_coords = coords[mask]
             sub_expr = expression.loc[mask, gene].values
+            # 计算 (x, y, [z]) 三个方向的加权平均，得到该基因的空间质心
             cx = np.average(sub_coords[:, 0], weights=sub_expr)
             cy = np.average(sub_coords[:, 1], weights=sub_expr)
             if z is not None:
                 cz = np.average(sub_coords[:, 2], weights=sub_expr)
-                centers[gene] = (cx, cy, cz)
+                centers[gene] = np.array([cx, cy, cz])
             else:
-                centers[gene] = (cx, cy)
-    # 计算有向距离矩阵
-    for gene_i in genes:
-        mask_i = expression[gene_i].values > threshold
-        if not mask_i.any():
-            continue  # 基因 i 无表达
-        sub_coords_i = coords_arr[mask_i]
-        sub_expr_i = expression.loc[mask_i, gene_i].values
-        for gene_j in genes:
-            center_j = centers.get(gene_j)
-            if center_j is None:
-                dist_matrix.loc[gene_i, gene_j] = np.nan
-            else:
-                # 计算基因 i 每个表达点到基因 j 质心的距离，并加权平均
-                center_arr = np.array(center_j)  # shape (2,) 或 (3,)
-                dists = np.linalg.norm(sub_coords_i - center_arr, axis=1)
-                avg_dist = np.average(dists, weights=sub_expr_i)
-                dist_matrix.loc[gene_i, gene_j] = avg_dist
-    return dist_matrix
+                centers[gene] = np.array([cx, cy])
+
+    # 逐个目标基因质心计算距离列
+    n_spots = coords.shape[0]
+    for j_idx, gene_j in enumerate(genes):
+        center_j = centers.get(gene_j)
+        if center_j is None:
+            continue  # 基因 j 无表达，整列 NaN
+        # 计算所有 spot 到质心 j 的距离
+        diff = coords - center_j  # shape: (n_spots, 2或3)
+        dist_to_center_j = np.linalg.norm(diff, axis=1)  # 每个spot到质心的欧氏距离
+
+        # 计算每个源基因 i 到该质心的加权平均距离
+        for i_idx, gene_i in enumerate(genes):
+            mask_i = expression[gene_i].values > threshold
+            if not mask_i.any():
+                continue  # 基因 i 无表达，整行 NaN
+            weights_i = expression.loc[mask_i, gene_i].values
+            dist_matrix_arr[i_idx, j_idx] = np.average(dist_to_center_j[mask_i], weights=weights_i)
+
+    dist_matrix_df = pd.DataFrame(dist_matrix_arr, index=genes, columns=genes)
+    return dist_matrix_df
 
 
 def compute_cophenetic_distances_from_group_mean_matrix(
