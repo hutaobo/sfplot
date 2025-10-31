@@ -2,6 +2,9 @@ import numpy as np
 import pandas as pd
 from scipy.spatial.distance import cdist
 from typing import Optional
+from typing import Optional, Tuple
+from scipy.cluster.hierarchy import linkage, cophenet
+from scipy.spatial.distance import pdist, squareform
 
 
 def calculate_gene_distance_matrix_ewnn(expression: pd.DataFrame,
@@ -97,12 +100,6 @@ def calculate_gene_distance_matrix_wmda(expression: pd.DataFrame,
                 dist_matrix.loc[gene_i, gene_j] = avg_dist
     return dist_matrix
 
-
-import numpy as np
-import pandas as pd
-from typing import Optional, Tuple
-from scipy.cluster.hierarchy import linkage, cophenet
-from scipy.spatial.distance import pdist, squareform
 
 def compute_cophenetic_distances_from_group_mean_matrix(
     df_group_mean_clean: pd.DataFrame,
