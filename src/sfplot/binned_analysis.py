@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from scipy.spatial.distance import cdist
+from typing import Optional
 
 
 def calculate_gene_distance_matrix_ewnn(expression: pd.DataFrame,
