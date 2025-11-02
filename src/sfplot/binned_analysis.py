@@ -8,24 +8,45 @@ from sklearn.neighbors import NearestNeighbors
 
 
 def calculate_gene_distance_matrix_ewnn(expression: pd.DataFrame,
-                                       coordinates: pd.DataFrame,
-                                       threshold: float = 0.0,
-                                       z: Optional[pd.Series] = None,
-                                       memory_limit_gb: float = 300.0,
-                                       batch_size: Optional[int] = None) -> pd.DataFrame:
+                                        coordinates: pd.DataFrame,
+                                        threshold: float = 0.0,
+                                        z: Optional[pd.Series] = None,
+                                        memory_limit_gb: float = 300.0,
+                                        batch_size: Optional[int] = None) -> pd.DataFrame:
     """
-    基于表达加权最近邻计算基因间有向距离矩阵 (EWNN 方法)的内存优化版本。
-    通过分块计算降低内存占用，避免在大规模矩阵计算时出现 MemoryError。
+    基于表达双重权重最小成本模型计算基因间有向距离矩阵的内存优化实现。
+    在该模型中，对每对基因 (i, j)，在基因 i 的表达点集 S_i 与基因 j 的表达点集 S_j
+    之间计算加权成本 C(s,t) 并取最小值作为 D_{ij}。计算公式为：
+        C(s,t) = d(s,t) / (E_i(s) * E_j(t))^α + ε，
+    其中 d(s,t) 为点 s 和点 t 间的欧氏距离，E_i(s)、E_j(t) 分别为基因 i 和 j
+    在这些点的表达值。α 默认为 0.5（根据表达值进行软权重），ε 为避免除零的极小常数 (如 1e-8)。
+    然后 D_{ij} = min_{s∈S_i, t∈S_j} C(s,t)。该距离矩阵非对称。
 
-    新增参数:
+    内存优化：仅考虑高于阈值 threshold 的表达点。对于没有任意表达点的基因，其对应行或列保持 NaN。
+    函数会根据基因总数估计输出矩阵大小，超过 memory_limit_gb 时使用内存映射临时文件存储结果。
+    参数 batch_size 可用于指定按批处理目标点的数量，以降低单次计算的内存峰值；如未指定则自动判断。
+
+    参数:
+        expression: pd.DataFrame
+            行索引为空间点（spot）的标识，列为基因名称，值为表达量。
+        coordinates: pd.DataFrame
+            与 expression 对应的坐标 (x, y) 列表（如为空间位置坐标），行顺序需与 expression 对齐。
+        threshold: float, 默认 0.0
+            表达阈值。仅当表达量大于该阈值时，空间点才计入计算。
+        z: Optional[pd.Series], 默认 None
+            可选的 z 坐标列（如 3D 空间坐标）。提供时将坐标维度扩展为 (x, y, z)。
         memory_limit_gb: float, 默认 300.0
-            内存使用上限 (GB)。当预计最终距离矩阵所需内存超过该值时，
-            将采用磁盘内存映射文件暂存结果，避免占用过多内存。
+            输出距离矩阵允许占用的最大内存（GB）。若预计矩阵过大将使用磁盘临时文件存储结果。
         batch_size: Optional[int], 默认 None
-            最近邻查询的批大小。如为 None，则根据可用内存自动选择批大小；
-            如指定具体数值，则按该批大小分批查询邻近距离。
-    其余参数与返回值同原函数。
+            每批处理的目标基因表达点数量。如未指定则根据点对数量自动选择分批策略；若指定则按该大小对目标点集分块计算。
+
+    返回:
+        pd.DataFrame: 行索引和列均为基因名称的距离矩阵（float64），表示基因间的定向距离。非可计算位置为 NaN。
     """
+    import numpy as np
+    import pandas as pd
+    from scipy.spatial.distance import cdist
+
     genes = list(expression.columns)
     n_genes = len(genes)
     # 根据基因数估算最终距离矩阵大小，决定是否使用磁盘临时存储
@@ -34,7 +55,7 @@ def calculate_gene_distance_matrix_ewnn(expression: pd.DataFrame,
     use_memmap = total_bytes > memory_limit_bytes
 
     if use_memmap:
-        # 创建临时内存映射文件用于存储结果矩阵
+        # 创建临时内存映射文件用于存储结果矩阵，以避免占用过多内存
         import tempfile
         tmp = tempfile.NamedTemporaryFile(prefix="gene_dist_ewnn_", suffix=".dat", delete=False)
         tmp_filename = tmp.name
@@ -45,9 +66,8 @@ def calculate_gene_distance_matrix_ewnn(expression: pd.DataFrame,
         # 在内存中初始化结果矩阵
         dist_matrix_arr = np.full((n_genes, n_genes), np.nan, dtype=np.float64)
 
-    # 预先计算每个基因的有效表达掩码，提升重复使用效率
+    # 预先计算每个基因的有效表达掩码和表达值数组，提升重复使用效率
     gene_masks = {gene: (expression[gene].values > threshold) for gene in genes}
-    # 可选：预存每个基因的表达值数组以加速索引
     gene_expr_values = {gene: expression[gene].values for gene in genes}
 
     # 构造坐标矩阵 (如果提供了 z 坐标则一并包含)
@@ -56,52 +76,69 @@ def calculate_gene_distance_matrix_ewnn(expression: pd.DataFrame,
         coords = np.hstack([coords, np.asarray(z).reshape(-1, 1)])
     n_spots = coords.shape[0]
 
-    # 确定批大小：如未指定则自动估算
-    if batch_size is None:
-        try:
-            # 尝试利用已有工具按内存情况选取批大小
-            from sfplot.compute_cophenetic_distances_from_df_memory_opt import pick_batch_size
-            batch = pick_batch_size(n_cells=n_spots, dims=coords.shape[1])
-        except ImportError:
-            batch = n_spots  # 无法导入则不分批
-    else:
-        batch = min(batch_size, n_spots)
+    # 设置计算参数
+    alpha = 0.5
+    epsilon = 1e-8
+    max_pairs = 1e7  # 单次计算的最大点对数，以控制内存使用
 
-    # 逐个目标基因计算距离列（“Findee”方向），按需分批查询最近邻
-    for j_idx, gene_j in enumerate(genes):
-        mask_j = gene_masks[gene_j]
-        if not mask_j.any():
-            continue  # 基因 j 无表达，整列保持 NaN
+    # 计算距离矩阵：对每个源基因 i（行）计算到每个目标基因 j（列）的距离
+    for i_idx, gene_i in enumerate(genes):
+        mask_i = gene_masks[gene_i]
+        if not mask_i.any():
+            continue  # 基因 i 无表达，整行保持 NaN
+        # 提取基因 i 的表达坐标和表达值
+        coords_i = coords[mask_i]
+        expr_i = gene_expr_values[gene_i][mask_i]
+        # 计算基因 i 表达值的α次幂，用于权重
+        E_i_alpha = np.power(expr_i, alpha)
+        num_i = coords_i.shape[0]
 
-        # 构建基因 j 表达坐标的 1-近邻搜索模型
-        coords_j = coords[mask_j]
-        nbrs = NearestNeighbors(n_neighbors=1, algorithm='auto').fit(coords_j)
+        for j_idx, gene_j in enumerate(genes):
+            mask_j = gene_masks[gene_j]
+            if not mask_j.any():
+                continue  # 基因 j 无表达，整列保持 NaN
+            coords_j = coords[mask_j]
+            expr_j = gene_expr_values[gene_j][mask_j]
+            num_j = coords_j.shape[0]
 
-        # 计算所有样本点到当前基因 j 表达点集的最近邻距离，可分批执行
-        if batch >= n_spots:
-            # 单批次直接查询所有点
-            dist_all, _ = nbrs.kneighbors(coords)
-            dist_all = dist_all[:, 0]  # 提取最近邻距离
-        else:
-            # 分批查询以降低内存峰值
-            dist_all = np.empty(n_spots, dtype=np.float64)
-            for start in range(0, n_spots, batch):
-                end = min(n_spots, start + batch)
-                dist_batch, _ = nbrs.kneighbors(coords[start:end])
-                dist_all[start:end] = dist_batch[:, 0]
+            # 确定是否需要分批计算以降低内存峰值
+            if batch_size is not None:
+                chunk_size = min(batch_size, num_j)
+            elif num_i * num_j > max_pairs:
+                chunk_size = int(max_pairs // num_i) or 1
+            else:
+                chunk_size = None
 
-        # 利用预计算的距离数组和表达权重，计算各源基因到基因 j 的加权平均最近邻距离
-        for i_idx, gene_i in enumerate(genes):
-            mask_i = gene_masks[gene_i]
-            if not mask_i.any():
-                continue  # 基因 i 无表达，整行保持 NaN
-            # 提取基因 i 在表达位置的距离和权重
-            dists_i = dist_all[mask_i]
-            weights_i = gene_expr_values[gene_i][mask_i]
-            # 计算加权平均距离
-            dist_matrix_arr[i_idx, j_idx] = np.average(dists_i, weights=weights_i)
+            if chunk_size and chunk_size < num_j:
+                # 分块计算目标基因 j 的表达点，累积最小成本
+                min_cost_val = np.inf
+                for start in range(0, num_j, chunk_size):
+                    end = min(num_j, start + chunk_size)
+                    sub_coords_j = coords_j[start:end]
+                    sub_expr_j = expr_j[start:end]
+                    # 计算基因 i 所有表达点到本批次基因 j 表达点的距离矩阵
+                    sub_dist = cdist(coords_i, sub_coords_j)  # 形状: (num_i, end-start)
+                    # 按表达值进行双重权重
+                    sub_dist /= E_i_alpha[:, None]  # 每行除以对应基因 i 表达值^α
+                    sub_E_j_alpha = np.power(sub_expr_j, alpha)
+                    sub_dist /= sub_E_j_alpha[None, :]  # 每列除以对应基因 j 表达值^α
+                    sub_dist += epsilon  # 加上微小常数稳定计算
+                    # 更新当前最小成本
+                    sub_min = np.min(sub_dist)
+                    if sub_min < min_cost_val:
+                        min_cost_val = sub_min
+                dist_matrix_arr[i_idx, j_idx] = min_cost_val
+            else:
+                # 一次性计算所有点对成本
+                dist_matrix = cdist(coords_i, coords_j)  # 形状: (num_i, num_j)
+                dist_matrix /= E_i_alpha[:, None]  # 按基因 i 表达值加权
+                E_j_alpha = np.power(expr_j, alpha)
+                dist_matrix /= E_j_alpha[None, :]  # 按基因 j 表达值加权
+                dist_matrix += epsilon  # 加上微小常数以避免零距离
+                # 取最小成本作为 D_{ij}
+                dist_matrix_arr[i_idx, j_idx] = np.min(dist_matrix)
 
-    # 将结果转换为 DataFrame 返回，索引/列与输入基因顺序一致
+    # 将结果转换为 DataFrame，索引和列与输入基因顺序一致
     dist_matrix_df = pd.DataFrame(dist_matrix_arr, index=genes, columns=genes)
     return dist_matrix_df
 
