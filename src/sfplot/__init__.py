@@ -32,7 +32,7 @@ from .binned_analysis import (
     calculate_gene_distance_matrix_wmda,
     calculate_gene_distance_matrix_ewnn,
 )
-from xenium_preprocessing import merge_xenium_clusters_into_adata
+from .xenium_preprocessing import merge_xenium_clusters_into_adata
 
 # ---- expose submodule so `sfplot.circular_dendrogram.*` works ----
 from . import circular_dendrogram
