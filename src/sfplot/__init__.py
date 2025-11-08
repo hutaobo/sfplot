@@ -13,6 +13,8 @@ from .compute_cophenetic_distances_from_df_memory_opt import (
 from .Searcher_Findee_Score import (
     compute_cophenetic_distances_from_adata,
     compute_cophenetic_distances_from_df,
+    compute_cophenetic_from_distance_matrix,
+    compute_searcher_findee_distance_matrix_from_df,
     plot_cophenetic_heatmap,
 )
 from .TCR_distance_heatmap import generate_TCR_distance_heatmap_from_df
@@ -43,6 +45,8 @@ __all__ = [
     "compute_col_dendrogram_scores",
     "compute_cophenetic_distances_from_adata",
     "compute_cophenetic_distances_from_df",
+    "compute_cophenetic_from_distance_matrix",
+    "compute_searcher_findee_distance_matrix_from_df",
     "compute_cophenetic_distances_from_df_memory_opt",
     "compute_cophenetic_distances_from_group_mean_matrix",
     "plot_cophenetic_heatmap",
