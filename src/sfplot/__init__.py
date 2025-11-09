@@ -33,6 +33,7 @@ from .binned_analysis import (
     calculate_gene_distance_matrix_ewnn,
 )
 from .xenium_preprocessing import merge_xenium_clusters_into_adata
+from .visium_preprocesssing import read_visium_bin
 
 # ---- expose submodule so `sfplot.circular_dendrogram.*` works ----
 from . import circular_dendrogram
@@ -57,6 +58,7 @@ __all__ = [
     "generate_cluster_distance_heatmap_from_df",
     "generate_cluster_distance_heatmap_from_path",
     "load_xenium_data",
+    "read_visium_bin",
     "split_B_by_distance_to_A",
     "transcript_by_cell_analysis",
     "transcript_by_cell_analysis_serial",
