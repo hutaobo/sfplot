@@ -1,90 +1,99 @@
-from pathlib import Path
-import pandas as pd
+import os
+import shutil
 import tempfile
-from spatialdata_io import visium
+from pathlib import Path
+from spatialdata_io import visium  # 假设 spatialdata_io.visium 函数已正确导入
 
-def read_visium_bin(
-    base: Path,
-    dataset_id: str,
-    use_filtered: bool = True,
-    tmpdir: Path | None = None,
-    keep_tmp: bool = False,
-):
+
+def read_visium_bin(base_path: str, dataset_id: str = None,  # 保持原接口参数
+                    counts_file: str = 'filtered_feature_bc_matrix.h5',
+                    tissue_positions_file: str = None,
+                    fullres_image_file: str = None,
+                    scalefactors_file: str = None,
+                    var_names_make_unique: bool = True,
+                    imread_kwargs=None, image_models_kwargs=None,
+                    keep_tmp: bool = False):
     """
-    base: 形如 .../binned_outputs/square_016um 的目录（只读也可）
-    dataset_id: 该层在 sdata 里的名字
-    tmpdir: 可写目录；若为 None 则用系统临时目录
-    keep_tmp: 是否保留临时CSV（防止下游惰性读取失败）
+    读取10x Genomics Visium数据（使用HDF5矩阵文件），返回SpatialData对象。
+    修改：使用临时影子目录解决tissue_positions文件路径限制问题。
     """
-    spatial_dir = base / "spatial"
-    pqt = spatial_dir / "tissue_positions.parquet"
-    csv_existing = spatial_dir / "tissue_positions.csv"
-
-    # 优先从 parquet 读取，否则再从 csv
-    if pqt.exists():
-        pos = pd.read_parquet(pqt)
-    elif csv_existing.exists():
-        pos = pd.read_csv(csv_existing)
-    else:
-        raise FileNotFoundError("Neither tissue_positions.parquet nor tissue_positions.csv found in spatial/.")
-
-    # 统一列名
-    if "barcode" not in pos.columns:
-        pos = pos.rename_axis("barcode").reset_index()
-
-    rename = {}
-    if "array_row" not in pos.columns:
-        for cand in ["row", "array_y", "grid_y", "spot_row"]:
-            if cand in pos.columns:
-                rename[cand] = "array_row"; break
-    if "array_col" not in pos.columns:
-        for cand in ["col", "array_x", "grid_x", "spot_col"]:
-            if cand in pos.columns:
-                rename[cand] = "array_col"; break
-    if "pxl_col_in_fullres" not in pos.columns:
-        for cand in ["pxl_x", "pxl_col", "x", "image_x"]:
-            if cand in pos.columns:
-                rename[cand] = "pxl_col_in_fullres"; break
-    if "pxl_row_in_fullres" not in pos.columns:
-        for cand in ["pxl_y", "pxl_row", "y", "image_y"]:
-            if cand in pos.columns:
-                rename[cand] = "pxl_row_in_fullres"; break
-    if "in_tissue" not in pos.columns:
-        for cand in ["inTissue", "intissue", "in_tissue_flag", "is_tissue"]:
-            if cand in pos.columns:
-                rename[cand] = "in_tissue"; break
-    pos = pos.rename(columns=rename)
-
-    for need in ["barcode","in_tissue","array_row","array_col","pxl_col_in_fullres","pxl_row_in_fullres"]:
-        if need not in pos.columns: pos[need] = 0
-
-    cols = ["barcode","in_tissue","array_row","array_col","pxl_col_in_fullres","pxl_row_in_fullres"]
-
-    # 总是写入临时目录
-    if tmpdir is not None:
-        tmpdir = Path(tmpdir)
-        tmpdir.mkdir(parents=True, exist_ok=True)
-        tissue_csv = tmpdir / f"{dataset_id}__tissue_positions.csv"
-    else:
-        ntf = tempfile.NamedTemporaryFile(prefix=f"{dataset_id}__", suffix=".csv", delete=False)
-        tissue_csv = Path(ntf.name)
-        ntf.close()
-
-    pos[cols].to_csv(tissue_csv, index=False)
-
+    # 1. 创建临时影子目录及spatial子目录
+    shadow_dir = Path(tempfile.mkdtemp())  # 创建临时目录
+    spatial_shadow = shadow_dir / "spatial"
+    spatial_shadow.mkdir(parents=True, exist_ok=True)
     try:
-        sdata = visium(
-            path=base,
-            dataset_id=dataset_id,
-            counts_file=("filtered_feature_bc_matrix.h5" if use_filtered else "raw_feature_bc_matrix.h5"),
-            tissue_positions_file=tissue_csv,
-            scalefactors_file=spatial_dir / "scalefactors_json.json",
-        )
-    finally:
-        if not keep_tmp:
-            try:
-                tissue_csv.unlink(missing_ok=True)
-            except Exception:
-                pass
+        # 2. 准备tissue_positions.csv文件内容
+        tissue_file_path = None
+        if tissue_positions_file:
+            tissue_file_path = Path(tissue_positions_file)
+        else:
+            # 尝试在base目录下找到tissue_positions文件
+            for fname in ["tissue_positions.csv", "tissue_positions_list.csv"]:
+                candidate = Path(base_path) / "spatial" / fname
+                if candidate.exists():
+                    tissue_file_path = candidate
+                    break
+        if tissue_file_path is None or not tissue_file_path.exists():
+            shutil.rmtree(shadow_dir)  # 清理临时目录
+            raise FileNotFoundError(f"无法找到组织位置信息文件（tissue_positions）于 {base_path} 或指定路径。")
+        # 将tissue_positions内容写入影子目录中的 spatial/tissue_positions.csv
+        shadow_tissue_csv = spatial_shadow / "tissue_positions.csv"
+        shutil.copyfile(tissue_file_path, shadow_tissue_csv)
 
-    return sdata
+        # 3. 链接或复制必要的文件到影子目录
+        base_path = Path(base_path)
+        # 3a. 处理表达矩阵（counts）文件
+        counts_path = base_path / (dataset_id + "_" + counts_file if dataset_id else counts_file)
+        if not counts_path.exists():
+            # counts文件找不到
+            shutil.rmtree(shadow_dir)
+            raise FileNotFoundError(f"无法在 {base_path} 找到计数矩阵文件 {counts_path.name}")
+        # 将counts文件链接/复制到影子目录根下
+        shadow_counts_path = shadow_dir / counts_path.name
+        try:
+            # 首选创建符号链接
+            os.symlink(counts_path, shadow_counts_path)
+        except Exception:
+            # 如不支持符号链接则尝试复制
+            shutil.copy2(counts_path, shadow_counts_path)
+
+        # 3b. 处理spatial子目录下的其他文件（图像和scalefactors等）
+        spatial_files = []
+        # 如果用户指定了fullres_image_file或scalefactors_file路径，则也添加
+        if fullres_image_file:
+            spatial_files.append(Path(fullres_image_file))
+        if scalefactors_file:
+            spatial_files.append(Path(scalefactors_file))
+        # 添加常见的文件名，如果存在则复制/链接
+        default_spatial_names = ["tissue_hires_image.png", "tissue_lowres_image.png", "scalefactors_json.json"]
+        for name in default_spatial_names:
+            file_path = base_path / "spatial" / name
+            if file_path.exists():
+                spatial_files.append(file_path)
+        # 去重并复制/链接文件
+        spatial_files = set(spatial_files)
+        for file_path in spatial_files:
+            target_path = spatial_shadow / file_path.name
+            try:
+                os.symlink(file_path, target_path)
+            except Exception:
+                shutil.copy2(file_path, target_path)
+
+        # 4. 调用visium读取数据，指定tissue_positions_file相对路径
+        sdata = visium(
+            path=shadow_dir,
+            dataset_id=dataset_id,
+            counts_file=shadow_counts_path.name,
+            fullres_image_file=fullres_image_file if fullres_image_file else None,
+            tissue_positions_file="spatial/tissue_positions.csv",  # 相对路径
+            scalefactors_file=Path("spatial") / "scalefactors_json.json" if (
+                    spatial_shadow / "scalefactors_json.json").exists() else None,
+            var_names_make_unique=var_names_make_unique,
+            imread_kwargs=imread_kwargs or {},
+            image_models_kwargs=image_models_kwargs or {}
+        )
+        return sdata  # 返回SpatialData对象
+    finally:
+        # 5. 清理临时目录（除非用户要求保留）
+        if not keep_tmp:
+            shutil.rmtree(shadow_dir, ignore_errors=True)
