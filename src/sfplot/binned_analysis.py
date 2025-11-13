@@ -327,3 +327,220 @@ def compute_cophenetic_distances_from_group_mean_matrix(
         col_coph_df = _normalize_to_01(col_coph_df)
 
     return row_coph_df, col_coph_df
+
+
+import numpy as np
+import pandas as pd
+from scipy.spatial import cKDTree
+from scipy.cluster.hierarchy import linkage, cophenet
+from scipy.spatial.distance import squareform
+
+
+def _get_gene_spots_and_weights(expression_df, genes, threshold=0.0):
+    """
+    对每个基因：
+      - 找出表达 > threshold 的 spot 行号
+      - 对应的表达值作为权重
+    支持 dense 和 pandas sparse。
+    """
+    gene_spots = {}
+    gene_weights = {}
+
+    for g in genes:
+        col = expression_df[g]
+
+        if pd.api.types.is_sparse(col.dtype):
+            coo = col.sparse.to_coo()
+            mask = coo.data > threshold
+            spots_idx = coo.row[mask]
+            weights = coo.data[mask]
+        else:
+            values = col.values
+            mask = values > threshold
+            spots_idx = np.where(mask)[0]
+            weights = values[mask]
+
+        gene_spots[g] = spots_idx.astype(int)
+        gene_weights[g] = weights.astype(float)
+
+    return gene_spots, gene_weights
+
+
+def _weighted_quantile(values, weights, q):
+    """
+    计算一维数组的（可选权重）分位数 q∈(0,1)。
+    """
+    values = np.asarray(values, dtype=float)
+
+    if values.size == 0:
+        return np.nan
+
+    if weights is None:
+        return float(np.quantile(values, q))
+
+    weights = np.asarray(weights, dtype=float)
+    if np.all(weights <= 0):
+        return float(np.quantile(values, q))
+
+    order = np.argsort(values)
+    v = values[order]
+    w = weights[order]
+
+    cum_w = np.cumsum(w)
+    if cum_w[-1] == 0:
+        return float(np.quantile(values, q))
+
+    cum_w /= cum_w[-1]
+    idx = np.searchsorted(cum_w, q)
+    idx = min(idx, v.size - 1)
+    return float(v[idx])
+
+
+def _aggregate_distances(dists, weights, agg="quantile", q=0.9, weight_by_expression=True):
+    """
+    把一串最近邻距离聚合成一个标量。
+    """
+    dists = np.asarray(dists, dtype=float)
+    if dists.size == 0:
+        return np.nan
+
+    if not weight_by_expression:
+        weights = None
+
+    if agg == "mean":
+        if weights is None:
+            return float(dists.mean())
+        else:
+            return float(np.average(dists, weights=weights))
+    elif agg == "median":
+        return _weighted_quantile(dists, weights, 0.5)
+    elif agg == "quantile":
+        return _weighted_quantile(dists, weights, q)
+    else:
+        raise ValueError(f"Unknown agg: {agg}")
+
+
+def _estimate_spot_nn_scale(coord_array):
+    """
+    用全局 KDTree 估计“典型最近邻距离”,
+    类似 Visium 的格子边长，用来归一化。
+    """
+    tree = cKDTree(coord_array)
+    # k=2: 第一个是自己，第二个是最近邻
+    dists, _ = tree.query(coord_array, k=2)
+    nn_dists = dists[:, 1]
+    nn_dists = nn_dists[np.isfinite(nn_dists)]
+    if nn_dists.size == 0:
+        return 1.0
+    scale = np.median(nn_dists)
+    return float(scale if scale > 0 else 1.0)
+
+
+def calculate_gene_distance_matrix_visium(
+    expression_df: pd.DataFrame,
+    coords_df: pd.DataFrame,
+    genes=None,
+    threshold: float = 0.0,
+    min_spots: int = 20,
+    min_total_expr: float = 0.0,
+    agg: str = "quantile",     # "mean", "median", "quantile"
+    quantile: float = 0.9,     # agg="quantile" 时使用
+    weight_by_expression: bool = True,
+    symmetric: str = "min"     # "none", "min", "mean"
+) -> pd.DataFrame:
+    """
+    适合 Visium 的基因–基因空间距离矩阵（COSTE 风格）.
+
+    - 使用表达加权最近邻（directed）
+    - 用稳健分位数聚合（默认 0.9 quantile）
+    - 对距离按“spot 最近邻尺度”归一化
+    """
+    if genes is None:
+        genes = list(expression_df.columns)
+    else:
+        genes = [g for g in genes if g in expression_df.columns]
+
+    # 确保 coords 顺序和 expression 行一致
+    coords = coords_df.loc[expression_df.index]
+    coord_array = coords.values  # (n_spots, 2)
+
+    # 估计 Visium 网格的典型最近邻尺度，用来归一化
+    nn_scale = _estimate_spot_nn_scale(coord_array)
+
+    # 预计算基因的表达 spot 和权重
+    gene_spots, gene_weights = _get_gene_spots_and_weights(
+        expression_df, genes, threshold=threshold
+    )
+
+    # 初始化结果矩阵
+    dist_matrix = pd.DataFrame(
+        np.nan, index=genes, columns=genes, dtype=float
+    )
+
+    # 为每个 target gene 建 KDTree
+    gene_trees = {}
+    for g in genes:
+        spots_j = gene_spots[g]
+        if spots_j.size == 0:
+            gene_trees[g] = None
+        else:
+            target_coords = coord_array[spots_j]
+            gene_trees[g] = cKDTree(target_coords)
+
+    # 主循环
+    for gi in genes:
+        spots_i = gene_spots[gi]
+        weights_i = gene_weights[gi]
+
+        if spots_i.size < min_spots or weights_i.sum() <= min_total_expr:
+            # 太稀疏的基因：整行 NaN
+            dist_matrix.loc[gi, :] = np.nan
+            continue
+
+        source_coords = coord_array[spots_i]
+
+        for gj in genes:
+            if gi == gj:
+                dist_matrix.loc[gi, gj] = 0.0
+                continue
+
+            spots_j = gene_spots[gj]
+            tree_j = gene_trees[gj]
+
+            # 目标基因太稀疏或完全没表达：认为基本不可达
+            if spots_j.size < min_spots or tree_j is None:
+                dist_matrix.loc[gi, gj] = np.inf
+                continue
+
+            # 最近邻查询：gi 的每个点到 gj 的最近点
+            dists, _ = tree_j.query(source_coords, k=1)
+
+            directed_raw = _aggregate_distances(
+                dists=dists,
+                weights=weights_i,
+                agg=agg,
+                q=quantile,
+                weight_by_expression=weight_by_expression
+            )
+
+            # 用全局最近邻尺度归一化，避免不同数据集/分辨率不可比
+            directed_norm = directed_raw / nn_scale
+            dist_matrix.loc[gi, gj] = directed_norm
+
+    # 可选对称化
+    if symmetric in ("min", "mean"):
+        arr = dist_matrix.values
+        n = arr.shape[0]
+        for i in range(n):
+            for j in range(i + 1, n):
+                dij = arr[i, j]
+                dji = arr[j, i]
+                if symmetric == "min":
+                    val = np.nanmin([dij, dji])
+                else:  # "mean"
+                    val = np.nanmean([dij, dji])
+                arr[i, j] = arr[j, i] = val
+        np.fill_diagonal(arr, 0.0)
+        dist_matrix.iloc[:, :] = arr
+
+    return dist_matrix

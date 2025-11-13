@@ -31,6 +31,7 @@ from .binned_analysis import (
     compute_cophenetic_distances_from_group_mean_matrix,
     calculate_gene_distance_matrix_wmda,
     calculate_gene_distance_matrix_ewnn,
+    calculate_gene_distance_matrix_visium,
 )
 from .xenium_preprocessing import merge_xenium_clusters_into_adata
 from .visium_preprocesssing import read_visium_bin
@@ -44,6 +45,7 @@ __all__ = [
     "merge_xenium_clusters_into_adata",
     "calculate_gene_distance_matrix_ewnn",
     "calculate_gene_distance_matrix_wmda",
+    "calculate_gene_distance_matrix_visium",
     "circle_heatmap",
     "compute_col_dendrogram_scores",
     "compute_cophenetic_distances_from_adata",
