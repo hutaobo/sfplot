@@ -2,40 +2,40 @@
 sfplot
 ======
 
+``sfplot`` is a Python package for spatial structure analysis in spatial omics data.
+It implements the Search-and-Find Plot (SFplot) / Cell-GPS workflow used to compute
+cophenetic distance-based structure maps, analyze cell-cell and transcript-cell
+relationships, and visualize multiscale tissue organization.
 
-.. image:: https://img.shields.io/pypi/v/sfplot.svg
-        :target: https://pypi.python.org/pypi/sfplot
+Key features
+------------
 
-.. image:: https://img.shields.io/travis/hutaobo/sfplot.svg
-        :target: https://travis-ci.com/hutaobo/sfplot
+* Compute cophenetic distance matrices from ``AnnData`` objects or coordinate tables.
+* Generate StructureMap heatmaps and circular dendrograms.
+* Load and preprocess 10x Xenium outputs.
+* Run transcript-by-cell analysis for large spatial datasets.
+* Support memory-optimized workflows for larger coordinate tables.
 
-.. image:: https://readthedocs.org/projects/sfplot/badge/?version=latest
-        :target: https://sfplot.readthedocs.io/en/latest/?version=latest
-        :alt: Documentation Status
+Installation
+------------
 
+Install from GitHub:
 
-.. image:: https://pyup.io/repos/github/hutaobo/sfplot/shield.svg
-     :target: https://pyup.io/repos/github/hutaobo/sfplot/
-     :alt: Updates
+.. code-block:: bash
 
+   pip install git+https://github.com/hutaobo/sfplot.git
 
+For local inspection:
 
-For plotting the Search and Find Plot (SFplot).
+.. code-block:: bash
 
+   git clone https://github.com/hutaobo/sfplot.git
+   cd sfplot
+   pip install -e .
 
-* Free software: MIT license
-* Documentation: https://sfplot.readthedocs.io.
+Reviewer note
+-------------
 
-
-Features
---------
-
-* TODO
-
-Credits
--------
-
-This package was created with Cookiecutter_ and the `audreyr/cookiecutter-pypackage`_ project template.
-
-.. _Cookiecutter: https://github.com/audreyr/cookiecutter
-.. _`audreyr/cookiecutter-pypackage`: https://github.com/audreyr/cookiecutter-pypackage
+The main implementation lives in ``src/sfplot/``. Manuscript-specific notebooks and
+derived figure assets are stored in ``sfplot-manuscript/``. See ``REVIEWER_GUIDE.md``
+for a short walkthrough of the repository.

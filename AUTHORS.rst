@@ -1,14 +1,16 @@
 =======
-Credits
+Authors
 =======
 
-Development Lead
-----------------
+Project and corresponding authors
+---------------------------------
 
-* Taobo Hu <taobo.hu@scilifelab.se>
 * Mengping Long <mengping.long@scilifelab.se>
+* Taobo Hu <taobo.hu@scilifelab.se>
+* Mats Nilsson <mats.nilsson@scilifelab.se>
 
-Contributors
-------------
+Code repository maintainers
+---------------------------
 
-None yet. Why not be the first?
+* Taobo Hu
+* Mengping Long

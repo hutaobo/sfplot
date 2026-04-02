@@ -53,6 +53,7 @@ __all__ = [
     "compute_cophenetic_from_distance_matrix",
     "compute_searcher_findee_distance_matrix_from_df",
     "compute_cophenetic_distances_from_df_memory_opt",
+    "pick_batch_size",
     "compute_cophenetic_distances_from_group_mean_matrix",
     "plot_cophenetic_heatmap",
     "generate_TCR_distance_heatmap_from_df",

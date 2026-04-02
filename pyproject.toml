@@ -5,11 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sfplot"
 version = "0.0.2"
-description = "For plotting the Search and Find Plot (SFplot)."
+description = "Spatial structure analysis and Search-and-Find plot generation for spatial omics data."
 readme = "README.md"
 authors = [
     { name = "Taobo Hu", email = "taobo.hu@scilifelab.se" },
-    { name = "Mengping Long", email = "mengping.long@scilifelab.se" }
+    { name = "Mengping Long", email = "mengping.long@scilifelab.se" },
+    { name = "Mats Nilsson", email = "mats.nilsson@scilifelab.se" }
 ]
 license = { text = "MIT License" }
 requires-python = ">=3.9"
@@ -22,6 +23,10 @@ dependencies = [
     "scikit-learn",
     "spatialdata_io"
 ]
+
+[project.urls]
+Homepage = "https://github.com/hutaobo/sfplot"
+Repository = "https://github.com/hutaobo/sfplot"
 
 # 如果你有动态字段，可以在这里声明
 # dynamic = ["some_dynamic_field"]

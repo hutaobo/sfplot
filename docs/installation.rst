@@ -4,48 +4,30 @@
 Installation
 ============
 
+From GitHub
+-----------
 
-Stable release
---------------
-
-To install sfplot, run this command in your terminal:
+Install directly from the public repository:
 
 .. code-block:: console
 
-    $ pip install sfplot
+   $ pip install git+https://github.com/hutaobo/sfplot.git
 
-This is the preferred method to install sfplot, as it will always install the most recent stable release.
+For local inspection
+--------------------
 
-If you don't have `pip`_ installed, this `Python installation guide`_ can guide
-you through the process.
+Clone the repository and install it in editable mode:
 
-.. _pip: https://pip.pypa.io
-.. _Python installation guide: http://docs.python-guide.org/en/latest/starting/installation/
+.. code-block:: console
 
+   $ git clone https://github.com/hutaobo/sfplot.git
+   $ cd sfplot
+   $ pip install -e .
 
-From sources
+Requirements
 ------------
 
-The sources for sfplot can be downloaded from the `Github repo`_.
-
-You can either clone the public repository:
-
-.. code-block:: console
-
-    $ git clone git://github.com/hutaobo/sfplot
-
-Or download the `tarball`_:
-
-.. code-block:: console
-
-    $ curl -OJL https://github.com/hutaobo/sfplot/tarball/master
-
-Once you have a copy of the source, you can install it with:
-
-.. code-block:: console
-
-    $ python setup.py install
-
-
-.. _Github repo: https://github.com/hutaobo/sfplot
-.. _tarball: https://github.com/hutaobo/sfplot/tarball/master
+* Python 3.9 or newer
+* Standard scientific Python stack, including ``numpy``, ``pandas``,
+  ``matplotlib``, ``seaborn``, ``scanpy``, ``scikit-learn``, and
+  ``spatialdata_io``
