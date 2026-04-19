@@ -27,6 +27,11 @@ from sfplot import (
 )
 from spatialdata_io import xenium
 from tqdm import tqdm
+from .transcript_batching import (
+    iter_gene_batches,
+    load_transcript_batch,
+    open_transcript_batch_source,
+)
 
 # global logging and warnings configuration
 warnings.filterwarnings("ignore")
@@ -56,12 +61,10 @@ def _init_worker(shm_name, shm_shape, shm_dtype, adata_obs_df, row_coph_df, coph
     _shm = shared_memory.SharedMemory(name=shm_name)
     arr = np.ndarray(shm_shape, dtype=shm_dtype, buffer=_shm.buf)
 
-    # rebuild DataFrame without copying
+    # Rebuild a compact numeric DataFrame without copying Python string objects.
     _coords_global = pd.DataFrame.from_records(
-        arr, columns=["x", "y", "feature_name"]
+        arr, columns=["x", "y", "gene_code"]
     )
-    # ensure feature_name is string type
-    _coords_global["feature_name"] = _coords_global["feature_name"].astype(str)
     _coords_global.flags.writeable = False
 
     # set small globals from parent
@@ -75,35 +78,40 @@ def _init_worker(shm_name, shm_shape, shm_dtype, adata_obs_df, row_coph_df, coph
     )
 
 
-def _process_gene(gene: str) -> Optional[pd.DataFrame]:
+def _default_gene_row(gene: str) -> pd.DataFrame:
+    """Return the fallback output row for genes with no transcript coordinates."""
+    if gene not in _row_coph_global.index:
+        empty_cols = [col for col in _row_coph_global.columns if col != gene]
+        return pd.DataFrame(
+            [[np.nan] * len(empty_cols)],
+            index=[gene],
+            columns=empty_cols,
+        )
+
+    row = _row_coph_global.loc[gene].drop(labels=gene, errors="ignore")
+    return pd.DataFrame([row.values], index=[gene], columns=row.index)
+
+
+def _process_gene(gene_item: tuple[str, int]) -> Optional[pd.DataFrame]:
     """Return one-row DataFrame of cophenetic distances for a gene, or None if failure/empty."""
     if _coords_global is None:
         logging.error("Globals not initialised in worker")
         return None
+
+    gene, gene_code = gene_item
     try:
-        # select transcripts for this gene
-        sub = _coords_global[_coords_global["feature_name"] == gene]
+        # Select transcripts for this gene within the current streamed batch.
+        sub = _coords_global[_coords_global["gene_code"] == gene_code]
 
         # case 1: no spatial coordinates for gene
         if sub.empty:
-            if gene not in _row_coph_global.index:
-                # build empty row if gene not in initial distances
-                empty_cols = [col for col in _row_coph_global.columns if col != gene]
-                return pd.DataFrame(
-                    [[np.nan] * len(empty_cols)],
-                    index=[gene],
-                    columns=empty_cols,
-                )
-            # return global cophenetic row for gene
-            row = _row_coph_global.loc[gene].drop(labels=gene, errors="ignore")
-            return pd.DataFrame([row.values], index=[gene], columns=row.index)
+            return _default_gene_row(gene)
 
         # case 2: compute cophenetic distances for gene-transcripts
         df = pd.concat(
             [
                 _adata_obs,
-                sub[["x", "y", "feature_name"]]
-                .rename(columns={"feature_name": "celltype"})
+                sub[["x", "y"]]
                 .assign(celltype=gene),
             ],
             ignore_index=True,
@@ -126,6 +134,43 @@ def _process_gene(gene: str) -> Optional[pd.DataFrame]:
         return None
 
 
+def _load_all_transcripts(folder: str) -> pd.DataFrame:
+    """
+    Fallback path for datasets that do not expose `transcripts.parquet`.
+
+    This keeps the previous behavior available, but the preferred path is the
+    parquet-backed streaming reader used for large Xenium outputs.
+    """
+    logging.warning(
+        "Falling back to eager transcript loading because `transcripts.parquet` "
+        "is unavailable. Large datasets may require substantial memory."
+    )
+    sdata = xenium(
+        folder,
+        cells_boundaries=False,
+        nucleus_boundaries=False,
+        cells_as_circles=False,
+        cells_labels=False,
+        nucleus_labels=False,
+        transcripts=True,
+        morphology_mip=False,
+        morphology_focus=False,
+        aligned_images=False,
+        cells_table=False,
+    )
+
+    coords = sdata.points["transcripts"]
+    try:
+        coords = coords.compute()
+    except AttributeError:
+        pass
+    coords["feature_name"] = coords["feature_name"].astype(str)
+    return coords.loc[
+        ~coords["feature_name"].str.contains("NegControl|Unassigned", na=False),
+        ["x", "y", "feature_name"],
+    ]
+
+
 def transcript_by_cell_analysis(
     folder: str,
     sample_name: Optional[str] = None,
@@ -134,9 +179,14 @@ def transcript_by_cell_analysis(
     n_jobs: int = 32,
     maxtasks: int = 50,
     df: Optional[pd.DataFrame] = None,
+    gene_batch_size: int = 64,
 ):
     """
     Perform transcript-by-cell spatial analysis using shared memory and multiprocessing.
+
+    Transcript coordinates are loaded in streamed gene batches when
+    `transcripts.parquet` is available, which avoids materializing the entire
+    transcript table in memory at once.
     """
     global _adata_obs, _row_coph_global
 
@@ -145,33 +195,15 @@ def transcript_by_cell_analysis(
     out_dir = output_folder or f"./t_by_c_{sample}"
     os.makedirs(out_dir, exist_ok=True)
 
-    # load Xenium data and transcripts
+    if gene_batch_size <= 0:
+        raise ValueError("gene_batch_size must be a positive integer.")
+
+    # load Xenium data and configure transcript source
     adata = load_xenium_data(folder, normalize=False)
-    sdata = xenium(
-        folder,
-        cells_boundaries=False, nucleus_boundaries=False,
-        cells_as_circles=False, cells_labels=False,
-        nucleus_labels=False, transcripts=True,
-        morphology_mip=False, morphology_focus=False,
-        aligned_images=False, cells_table=False,
-    )
-
-    # filter transcripts and convert feature_name to string
-    coords = sdata.points["transcripts"]
-    try:
-        coords = coords.compute()
-    except AttributeError:
-        pass
-    coords["feature_name"] = coords["feature_name"].astype(str)
-    coords = coords.loc[
-        ~coords["feature_name"].str.contains("NegControl|Unassigned", na=False),
-        ["x", "y", "feature_name", "cell_id"],
-    ]
-
-    # create shared memory block for transcript coords
-    coords_arr = coords[["x", "y", "feature_name"]].to_records(index=False)
-    shm = shared_memory.SharedMemory(create=True, size=coords_arr.nbytes)
-    np.ndarray(coords_arr.shape, coords_arr.dtype, buffer=shm.buf)[:] = coords_arr
+    transcript_source = open_transcript_batch_source(folder)
+    coords_fallback: Optional[pd.DataFrame] = None
+    if transcript_source is None:
+        coords_fallback = _load_all_transcripts(folder)
 
     # prepare cell coordinates and celltype annotations
     adata.obs["x"] = adata.obsm["spatial"][:, 0]
@@ -201,49 +233,77 @@ def transcript_by_cell_analysis(
     out_csv = f"{out_dir}/t_and_c_result_{sample}.csv"
     header_written = False
 
-    try:
-        # initialize process pool
-        pool = Pool(
-            processes=n_jobs,
-            initializer=_init_worker,
-            initargs=(
-                shm.name, coords_arr.shape, coords_arr.dtype,
-                _adata_obs, _row_coph_global, coph_method
-            ),
-            maxtasksperchild=maxtasks
-        )
-        # open output file and iterate with progress bar
-        with open(out_csv, "w", newline="") as fout:
-            print("Workers initialized, start processing genes ...")
-            # compute chunksize for fewer dispatch calls
-            chunks = max(1, len(genes) // (n_jobs * 2))
-            iterable = pool.imap_unordered(_process_gene, genes, chunksize=chunks)
-            for df_gene in tqdm(
-                iterable,
-                total=len(genes),
-                desc=f"Processing genes ({sample})",
-                ncols=80,
-                file=sys.stdout,
-                mininterval=1.0,
-            ):
-                if df_gene is None:
-                    continue
-                df_gene.to_csv(fout, header=not header_written, index=True)
-                header_written = True
-                del df_gene
+    with open(out_csv, "w", newline="") as fout, tqdm(
+        total=len(genes),
+        desc=f"Processing genes ({sample})",
+        ncols=80,
+        file=sys.stdout,
+        mininterval=1.0,
+    ) as progress:
+        for gene_batch in iter_gene_batches(genes, gene_batch_size):
+            if transcript_source is not None:
+                coords = load_transcript_batch(transcript_source, gene_batch)
+            else:
+                coords = coords_fallback[coords_fallback["feature_name"].isin(gene_batch)].copy()
+
+            if coords.empty:
+                for gene in gene_batch:
+                    df_gene = _default_gene_row(gene)
+                    df_gene.to_csv(fout, header=not header_written, index=True)
+                    header_written = True
+                    del df_gene
+                progress.update(len(gene_batch))
                 gc.collect()
-    finally:
-        # clean up pool and shared memory
-        try:
-            pool.close()
-            pool.join()
-        except Exception:
-            pass
-        shm.close()
-        try:
-            shm.unlink()
-        except FileNotFoundError:
-            pass
+                continue
+
+            gene_codes = {gene: code for code, gene in enumerate(gene_batch)}
+            coords = coords.copy()
+            coords["gene_code"] = coords["feature_name"].map(gene_codes)
+            coords = coords.dropna(subset=["gene_code"])
+            coords["gene_code"] = coords["gene_code"].astype(np.int32)
+            coords_arr = coords[["x", "y", "gene_code"]].to_records(index=False)
+
+            shm = shared_memory.SharedMemory(create=True, size=coords_arr.nbytes)
+            try:
+                np.ndarray(coords_arr.shape, coords_arr.dtype, buffer=shm.buf)[:] = coords_arr
+                gene_tasks = [(gene, gene_codes[gene]) for gene in gene_batch]
+                batch_results: dict[str, pd.DataFrame] = {}
+                with Pool(
+                    processes=n_jobs,
+                    initializer=_init_worker,
+                    initargs=(
+                        shm.name,
+                        coords_arr.shape,
+                        coords_arr.dtype,
+                        _adata_obs,
+                        _row_coph_global,
+                        coph_method,
+                    ),
+                    maxtasksperchild=maxtasks,
+                ) as pool:
+                    chunks = max(1, len(gene_tasks) // max(1, n_jobs * 2))
+                    for df_gene in pool.imap_unordered(_process_gene, gene_tasks, chunksize=chunks):
+                        if df_gene is None:
+                            continue
+                        batch_results[str(df_gene.index[0])] = df_gene
+
+                for gene in gene_batch:
+                    if gene in batch_results:
+                        df_gene = batch_results[gene]
+                    else:
+                        df_gene = _default_gene_row(gene)
+                    df_gene.to_csv(fout, header=not header_written, index=True)
+                    header_written = True
+                    del df_gene
+            finally:
+                shm.close()
+                try:
+                    shm.unlink()
+                except FileNotFoundError:
+                    pass
+
+            progress.update(len(gene_batch))
+            gc.collect()
 
     print(f"[DONE] Outputs saved to: {out_dir}")
 

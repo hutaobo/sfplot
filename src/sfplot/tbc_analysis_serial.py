@@ -21,6 +21,11 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from spatialdata_io import xenium
+from .transcript_batching import (
+    iter_gene_batches,
+    load_transcript_batch,
+    open_transcript_batch_source,
+)
 
 # --- sfplot utilities -------------------------------------------------
 from sfplot import (
@@ -88,6 +93,49 @@ def _compute_structure_map(
     return row_coph
 
 
+def _default_gene_row(row_coph_global: pd.DataFrame, gene: str) -> pd.DataFrame:
+    """Return the fallback output row for genes with no transcript coordinates."""
+    if gene in row_coph_global.index:
+        row = row_coph_global.loc[gene].drop(gene, errors="ignore")
+        return pd.DataFrame([row.values], index=[gene], columns=row.index)
+
+    empty_cols = [c for c in row_coph_global.columns if c != gene]
+    return pd.DataFrame([[np.nan] * len(empty_cols)], index=[gene], columns=empty_cols)
+
+
+def _load_all_transcripts(folder: str) -> pd.DataFrame:
+    """
+    Fallback path for datasets that do not expose `transcripts.parquet`.
+
+    The preferred path is the parquet-backed streaming reader, but keeping this
+    fallback preserves compatibility with older Xenium outputs.
+    """
+    sdata = xenium(
+        folder,
+        cells_boundaries=False,
+        nucleus_boundaries=False,
+        cells_as_circles=False,
+        cells_labels=False,
+        nucleus_labels=False,
+        transcripts=True,
+        morphology_mip=False,
+        morphology_focus=False,
+        aligned_images=False,
+        cells_table=False,
+    )
+
+    coords = sdata.points["transcripts"]
+    try:
+        coords = coords.compute()              # dask -> pandas if necessary
+    except AttributeError:
+        pass
+    coords["feature_name"] = coords["feature_name"].astype(str)
+    return coords.loc[
+        ~coords["feature_name"].str.contains("NegControl|Unassigned", na=False),
+        ["x", "y", "feature_name"],
+    ]
+
+
 # ============================  PUBLIC API  ============================ #
 def transcript_by_cell_analysis_serial(
     folder: str,
@@ -95,6 +143,7 @@ def transcript_by_cell_analysis_serial(
     output_folder: Optional[str] = None,
     coph_method: str = "average",
     df: Optional[pd.DataFrame] = None,
+    gene_batch_size: int = 64,
 ):
     """
     Run transcript-by-cell spatial analysis *sequentially* (single process).
@@ -125,32 +174,13 @@ def transcript_by_cell_analysis_serial(
     # ---- 1. load data -------------------------------------------------
     print(f"[{sample}] Loading data …")
     adata = load_xenium_data(folder, normalize=False)
+    if gene_batch_size <= 0:
+        raise ValueError("gene_batch_size must be a positive integer.")
 
-    sdata = xenium(
-        folder,
-        cells_boundaries=False,
-        nucleus_boundaries=False,
-        cells_as_circles=False,
-        cells_labels=False,
-        nucleus_labels=False,
-        transcripts=True,
-        morphology_mip=False,
-        morphology_focus=False,
-        aligned_images=False,
-        cells_table=False,
-    )
-
-    # ---- 2. filter transcripts ---------------------------------------
-    coords = sdata.points["transcripts"]
-    try:
-        coords = coords.compute()              # dask -> pandas if necessary
-    except AttributeError:
-        pass
-    coords["feature_name"] = coords["feature_name"].astype(str)
-    coords = coords.loc[
-        ~coords["feature_name"].str.contains("NegControl|Unassigned", na=False),
-        ["x", "y", "feature_name", "cell_id"],
-    ]
+    transcript_source = open_transcript_batch_source(folder)
+    coords_fallback: Optional[pd.DataFrame] = None
+    if transcript_source is None:
+        coords_fallback = _load_all_transcripts(folder)
 
     # ---- 3. prepare observation table & structure map ----------------
     obs_df = _prepare_obs_df(adata, df)
@@ -161,47 +191,46 @@ def transcript_by_cell_analysis_serial(
     result_csv = os.path.join(out_dir, f"t_and_c_result_{sample}.csv")
     header_written = False
 
-    print(f"[{sample}] Processing {len(genes):,} genes …")
-    with open(result_csv, "w", newline="") as fout:
-        for gene in tqdm(genes, ncols=80, desc="Genes"):
-            # select transcripts for this gene
-            sub = coords[coords["feature_name"] == gene]
-
-            # case A: no coordinates for this gene
-            if sub.empty:
-                if gene in row_coph_global.index:
-                    row = row_coph_global.loc[gene].drop(gene, errors="ignore")
-                    df_gene = pd.DataFrame([row.values], index=[gene], columns=row.index)
-                else:
-                    # gene unseen anywhere -> all NaN
-                    empty_cols = [c for c in row_coph_global.columns if c != gene]
-                    df_gene = pd.DataFrame([[np.nan] * len(empty_cols)],
-                                           index=[gene], columns=empty_cols)
-            # case B: compute new cophenetic row
+    print(f"[{sample}] Processing {len(genes):,} genes in streamed batches …")
+    with open(result_csv, "w", newline="") as fout, tqdm(total=len(genes), ncols=80, desc="Genes") as progress:
+        for gene_batch in iter_gene_batches(genes, gene_batch_size):
+            if transcript_source is not None:
+                coords = load_transcript_batch(transcript_source, gene_batch)
             else:
-                tmp_df = pd.concat(
-                    [
-                        obs_df,
-                        sub[["x", "y", "feature_name"]]
-                        .rename(columns={"feature_name": "celltype"})
-                        .assign(celltype=gene),
-                    ],
-                    ignore_index=True,
-                )
-                row_new, _ = compute_cophenetic_distances_from_df(
-                    df=tmp_df,
-                    x_col="x",
-                    y_col="y",
-                    celltype_col="celltype",
-                    output_dir=None,
-                    method=coph_method,
-                )
-                series = row_new.loc[gene].drop(gene, errors="ignore")
-                df_gene = pd.DataFrame([series.values], index=[gene], columns=series.index)
+                coords = coords_fallback[coords_fallback["feature_name"].isin(gene_batch)].copy()
 
-            # write incremental CSV
-            df_gene.to_csv(fout, header=not header_written, index=True)
-            header_written = True
+            batch_lookup = {
+                gene: coords.loc[coords["feature_name"] == gene, ["x", "y"]]
+                for gene in gene_batch
+            }
+
+            for gene in gene_batch:
+                sub = batch_lookup[gene]
+                if sub.empty:
+                    df_gene = _default_gene_row(row_coph_global, gene)
+                else:
+                    tmp_df = pd.concat(
+                        [
+                            obs_df,
+                            sub.assign(celltype=gene),
+                        ],
+                        ignore_index=True,
+                    )
+                    row_new, _ = compute_cophenetic_distances_from_df(
+                        df=tmp_df,
+                        x_col="x",
+                        y_col="y",
+                        celltype_col="celltype",
+                        output_dir=None,
+                        method=coph_method,
+                    )
+                    series = row_new.loc[gene].drop(gene, errors="ignore")
+                    df_gene = pd.DataFrame([series.values], index=[gene], columns=series.index)
+
+                df_gene.to_csv(fout, header=not header_written, index=True)
+                header_written = True
+
+            progress.update(len(gene_batch))
 
     print(f"[DONE] Outputs saved to: {out_dir}")
 

@@ -19,9 +19,11 @@ dependencies = [
     "numpy",
     "matplotlib",
     "seaborn",
+    "pycirclize",
     "scanpy",
     "scikit-learn",
-    "spatialdata_io"
+    "spatialdata_io",
+    "tqdm"
 ]
 
 [project.urls]
