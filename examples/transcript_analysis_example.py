@@ -1,6 +1,17 @@
+"""
+Example: per-gene cophenetic distance analysis using parallel processing.
+
+Usage
+-----
+Edit the `adata` and `transcripts_pdf` variables below to point to your
+own AnnData object and transcript table, then run the script.
+"""
+
 import pandas as pd
 from joblib import Parallel, delayed
 from tqdm import tqdm
+
+from sfplot import compute_cophenetic_distances_from_df
 
 
 def process_gene(gene, adata, transcripts_pdf):

@@ -20,8 +20,8 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
-from sfplot import (
-    load_xenium_data,
+from ..preprocessing.data_processing import load_xenium_data
+from .searcher_findee_score import (
     compute_cophenetic_distances_from_df,
     plot_cophenetic_heatmap,
 )

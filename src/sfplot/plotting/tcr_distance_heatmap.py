@@ -47,7 +47,6 @@ def generate_TCR_distance_heatmap_from_df(
     # ------------------------
     # 3. 对每个 cluster，计算距离
     # ------------------------
-    from sklearn.neighbors import NearestNeighbors
     for c in unique_clusters:
         mask_c = (clusters == c)
         coords_c = coords[mask_c]

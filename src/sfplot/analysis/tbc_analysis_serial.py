@@ -23,8 +23,8 @@ from tqdm import tqdm
 from spatialdata_io import xenium
 
 # --- sfplot utilities -------------------------------------------------
-from sfplot import (
-    load_xenium_data,
+from ..preprocessing.data_processing import load_xenium_data
+from .searcher_findee_score import (
     compute_cophenetic_distances_from_df,   # core metric computation
     plot_cophenetic_heatmap,                # nice clustered heat-map
 )

@@ -1,5 +1,16 @@
-# 假设你有多个 adata 对象，存放在列表中
-adata_list = [adata1, adata2, adata3]  # 替换为你的实际对象
+"""
+Example: average cophenetic distances across multiple spatial samples.
+
+Usage
+-----
+Replace ``adata1``, ``adata2``, ``adata3`` with your own AnnData objects,
+update ``output_dir``, then run the script.
+"""
+
+from sfplot import compute_cophenetic_distances_from_adata
+
+# Replace with your actual AnnData objects
+adata_list = [adata1, adata2, adata3]  # noqa: F821
 
 # 初始化用于存储结果的列表
 row_cophenetic_list = []

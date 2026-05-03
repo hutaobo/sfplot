@@ -1,6 +1,9 @@
 from pathlib import Path
+import os
+import shutil
+import tempfile
+
 import pandas as pd
-import tempfile, shutil, os
 from spatialdata_io import visium
 
 def read_visium_bin(base: Path, dataset_id: str, use_filtered: bool = True, keep_tmp: bool = False):
