@@ -1,4 +1,5 @@
-import os, glob
+import glob
+import os
 import pandas as pd
 import geopandas as gpd
 from shapely.geometry import Polygon
@@ -44,7 +45,8 @@ def merge_xenium_clusters_into_adata(
             cell_id_col = cols["cell_id"]
             label_col = cols.get("label_id") or cols.get("label") or "index"
             def _norm(x):
-                s = str(x);  return s[:-2] if s.endswith(".0") else s
+                s = str(x)
+                return s[:-2] if s.endswith(".0") else s
             tmp = cb_gdf[[label_col, cell_id_col]].drop_duplicates().copy()
             tmp["label_id_norm"] = tmp[label_col].map(_norm)
             label_to_barcode = pd.Series(tmp[cell_id_col].astype(str).values,
@@ -83,7 +85,8 @@ def merge_xenium_clusters_into_adata(
         elif label_to_barcode is not None:
             bc_to_cluster = pd.Series(df[ccol].values, index=df[bcol].astype(str))
             def _norm(x):
-                s = str(x);  return s[:-2] if s.endswith(".0") else s
+                s = str(x)
+                return s[:-2] if s.endswith(".0") else s
             idx_norm = adata.obs_names.astype(str).map(_norm)
             adata.obs[colname] = idx_norm.map(label_to_barcode).map(bc_to_cluster)
         else:

@@ -1,8 +1,8 @@
 import numpy as np
 import pandas as pd
-from typing import Optional
 from typing import Optional, Tuple
 from scipy.cluster.hierarchy import linkage, cophenet
+from scipy.spatial import cKDTree
 from scipy.spatial.distance import cdist, pdist, squareform
 from sklearn.neighbors import NearestNeighbors
 
@@ -333,13 +333,6 @@ def compute_cophenetic_distances_from_group_mean_matrix(
         col_coph_df = _normalize_to_01(col_coph_df)
 
     return row_coph_df, col_coph_df
-
-
-import numpy as np
-import pandas as pd
-from scipy.spatial import cKDTree
-from scipy.cluster.hierarchy import linkage, cophenet
-from scipy.spatial.distance import squareform
 
 
 def _get_gene_spots_and_weights(expression_df, genes, threshold=0.0):

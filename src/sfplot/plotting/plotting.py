@@ -9,7 +9,7 @@ import pandas as pd
 import seaborn as sns
 from sklearn.neighbors import NearestNeighbors
 
-from .data_processing import load_xenium_data  # ensure this import path is correct
+from ..preprocessing.data_processing import load_xenium_data
 
 
 def generate_cluster_distance_heatmap_from_path(
@@ -350,23 +350,6 @@ def generate_cluster_distance_heatmap_from_adata(
 
     print(f"Cluster distance heatmap saved to {output_file}")
 
-
-import os
-import pandas as pd
-import numpy as np
-import seaborn as sns
-import matplotlib.pyplot as plt
-from sklearn.neighbors import NearestNeighbors
-from typing import Optional
-
-
-import os
-import pandas as pd
-import numpy as np
-import seaborn as sns
-import matplotlib.pyplot as plt
-from sklearn.neighbors import NearestNeighbors
-from typing import Optional
 
 def generate_cluster_distance_heatmap_from_df(
     df: pd.DataFrame,

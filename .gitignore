@@ -111,4 +111,18 @@ ENV/
 # Local workspaces that should stay out of the repo
 benchmarking/
 sfplot-manuscript/
+.codex_tmp/
+!CellGPS.spec
+
+# Windows thumbnail cache
+Thumbs.db
+
+# PyInstaller / splash assets
+*.ico
+splash.png
+
+# PyInstaller hooks committed to root
+hook-tkinter.py
+my_startup_hook.py
+disable_xsdata_entrypoints.py
 
