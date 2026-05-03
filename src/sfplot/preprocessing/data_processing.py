@@ -6,7 +6,6 @@ import tarfile
 from pathlib import Path
 from typing import Optional
 
-import h5py
 import pandas as pd
 
 
@@ -16,6 +15,15 @@ def _load_scanpy_module():
     except ImportError as exc:
         raise ImportError(
             "scanpy is required for Xenium table-bundle loading. Install scanpy to use this helper."
+        ) from exc
+
+
+def _load_h5py_module():
+    try:
+        return importlib.import_module("h5py")
+    except ImportError as exc:
+        raise ImportError(
+            "h5py is required for Xenium table-bundle loading. Install sfplot[xenium] to use this helper."
         ) from exc
 
 
@@ -85,6 +93,7 @@ def load_xenium_table_bundle(
     feature_matrix_path = _resolve_single_path(folder, feature_matrix_path, "cell_feature_matrix.h5")
 
     sc = _load_scanpy_module()
+    h5py = _load_h5py_module()
     cells = pd.read_parquet(cells_path, columns=["cell_id", x_col, y_col])
     cells["cell_id"] = cells["cell_id"].astype(str)
 
@@ -147,6 +156,7 @@ def load_xenium_data(folder: str, normalize: bool = True):
             "load_xenium_data requires spatialdata_io and its Xenium reader dependencies. "
             "If that stack is unavailable in your environment, use load_xenium_table_bundle instead."
         ) from exc
+    h5py = _load_h5py_module()
 
     # Load Xenium data from the specified folder; only retrieve cell table.
     sdata = spatialdata_io.xenium(
