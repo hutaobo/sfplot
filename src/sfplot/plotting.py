@@ -9,7 +9,7 @@ import pandas as pd
 import seaborn as sns
 from sklearn.neighbors import NearestNeighbors
 
-from .data_processing import load_xenium_data  # 确保这个导入路径正确
+from .data_processing import load_xenium_data  # ensure this import path is correct
 
 
 def generate_cluster_distance_heatmap_from_path(
@@ -17,91 +17,90 @@ def generate_cluster_distance_heatmap_from_path(
     sample: str,
     figsize: tuple = (8, 8),
     output_dir: Optional[str] = None,
-    show_dendrogram: bool = True  # 新增参数：是否绘制 dendrogram，默认绘制
+    show_dendrogram: bool = True  # new parameter: whether to draw dendrogram (default: True)
 ):
     """
-    生成并保存每个细胞群到最近群中心的距离热图。
+    Generate and save a distance heatmap from each cell cluster to its nearest cluster center.
 
-    参数:
-    --------
+    Parameters:
+    ----------
     base_path : str
-        数据所在的基础路径。
+        Base path where data is stored.
     sample : str
-        样本名称，用于指定具体的数据文件夹。
+        Sample name used to specify the data folder.
     output_dir : Optional[str]
-        输出 PDF 文件的目录。默认为当前工作目录。
+        Output directory for the PDF file. Defaults to current working directory.
 
-    返回值:
-    --------
+    Returns:
+    -------
     None
     """
-    # 设置输出目录
+    # Set output directory
     if output_dir is None:
         output_dir = os.getcwd()
     os.makedirs(output_dir, exist_ok=True)
 
-    # 拼接路径并读取数据
+    # Construct path and read data
     folder = os.path.join(base_path, sample)
     adata = load_xenium_data(folder)
 
-    # 1. 提取坐标和 cluster 信息
-    coords = adata.obsm["spatial"]  # (n_cells, 2)或(n_cells, 3)
-    clusters = adata.obs["Cluster"].astype("category")  # cluster 信息
-    unique_clusters = clusters.cat.categories  # 不同的 cluster 列表
+    # 1. Extract coordinates and cluster information
+    coords = adata.obsm["spatial"]  # (n_cells, 2) or (n_cells, 3)
+    clusters = adata.obs["Cluster"].astype("category")  # cluster information
+    unique_clusters = clusters.cat.categories  # list of unique clusters
 
-    # ---------------- (关键修改) ----------------
-    # 2. 新建一个结果 DataFrame，用于存放各细胞到每个 cluster 最近中心的距离
-    #    注意这里使用 adata.obs["cell_id"] 作为行索引
+    # ---------------- (key change) ----------------
+    # 2. Create a result DataFrame for storing nearest-cluster distances for each cell
+    #    Note: using adata.obs["cell_id"] as row index
     df_nearest_cluster_dist = pd.DataFrame(
         index=adata.obs["cell_id"],
         columns=unique_clusters,
         dtype=float
     )
 
-    # 3. 对每个 cluster，构建邻居模型并查询所有细胞到该 cluster 的最近距离
+    # 3. For each cluster, build a nearest-neighbor model and query distances from all cells
     for c in unique_clusters:
-        # 3.1 取出该 cluster 下的细胞坐标
+        # 3.1 Extract coordinates for this cluster
         mask_c = (clusters == c)
         coords_c = coords[mask_c]
 
-        # 如果这个 cluster 没有细胞，则整个列都置为 NaN
+        # If this cluster has no cells, set the entire column to NaN
         if coords_c.shape[0] == 0:
             df_nearest_cluster_dist.loc[:, c] = np.nan
             continue
 
-        # 3.2 建立最近邻模型
+        # 3.2 Build nearest-neighbor model
         nbrs_c = NearestNeighbors(n_neighbors=1, algorithm="auto")
         nbrs_c.fit(coords_c)
 
-        # 3.3 查询所有细胞到该 cluster 最近的距离
+        # 3.3 Query nearest distances from all cells to this cluster
         dist_c, _ = nbrs_c.kneighbors(coords)
         df_nearest_cluster_dist[c] = dist_c[:, 0]
 
-    # 4. 将结果保存到 adata.uns 中（或其他合适的位置）
+    # 4. Save results to adata.uns (or another suitable location)
     adata.uns["nearest_cluster_dist"] = df_nearest_cluster_dist
 
-    # ------------------- 以下为距离矩阵的层次聚类可视化 -------------------
-    # 5. 建立一个 Series，让它的 index 也是 cell_id，值是 cluster，这样后续 groupby 才能对得上
+    # ------------------- Below: hierarchical clustering visualization of distance matrix -------------------
+    # 5. Build a Series with cell_id as index and cluster as values for groupby alignment
     clusters_by_id = pd.Series(
-        data=clusters.values,  # cluster 的值
-        index=adata.obs["cell_id"],  # 与 df_nearest_cluster_dist.index 对齐
+        data=clusters.values,  # cluster values
+        index=adata.obs["cell_id"],  # aligned with df_nearest_cluster_dist.index
         name="Cluster"
     )
 
-    # 然后以 cell_id 为索引，对 df_nearest_cluster_dist 按 cluster 分组并计算均值
+    # Group df_nearest_cluster_dist by cluster using cell_id as index and compute mean
     df_group_mean = df_nearest_cluster_dist.groupby(clusters_by_id).mean()
 
-    # 6. 因为有可能某些列全部是 NaN，也可以选择只删除整列全 NaN 的情况
-    #    如果你不需要删除也可以不做这一步
+    # 6. Drop columns that are entirely NaN (optional)
     df_group_mean_clean = df_group_mean.dropna(axis=1, how="all")
 
     if df_group_mean_clean.empty:
         print(f"Warning: df_group_mean_clean is empty for sample {sample}.")
         print("Check if there are clusters that exist in the data.")
-        # 如果需要，可以继续处理其他样本
+        # If needed, process other samples here
         return
 
-    # 用 clustermap 对该矩阵进行聚类可视化
+    # Visualize this matrix with clustermap
     plt.figure(figsize=figsize)
     g = sns.clustermap(
         df_group_mean_clean,
@@ -113,12 +112,12 @@ def generate_cluster_distance_heatmap_from_path(
         annot=False
     )
 
-    # 3) 设置热图单元格为正方形
+    # 3) Set heatmap cells to be square
     g.ax_heatmap.set_aspect("equal")
 
-    # 如果绘制 dendrogram，则调整 dendrogram 和 color legend 的位置
+    # If drawing dendrogram, adjust dendrogram and color legend positions
     if show_dendrogram:
-        # 4) 修正行 dendrogram 与热图在 y 方向上的对齐
+        # 4) Fix row dendrogram alignment with heatmap in y direction
         row_dendro_pos = g.ax_row_dendrogram.get_position()
         heatmap_pos = g.ax_heatmap.get_position()
         g.ax_row_dendrogram.set_position([
@@ -128,7 +127,7 @@ def generate_cluster_distance_heatmap_from_path(
             heatmap_pos.height
         ])
 
-        # 5) 修正列 dendrogram 与热图在 x 方向上的对齐
+        # 5) Fix column dendrogram alignment with heatmap in x direction
         col_dendro_pos = g.ax_col_dendrogram.get_position()
         g.ax_col_dendrogram.set_position([
             heatmap_pos.x0,
@@ -137,10 +136,10 @@ def generate_cluster_distance_heatmap_from_path(
             col_dendro_pos.height
         ])
 
-        # 6) 调整 color legend（g.cax）位置
-        # 计算左上角的空白区域：
-        # 该区域的水平范围为：从 row dendrogram 的左边界到热图左边界；
-        # 垂直范围为：从 col dendrogram 的上边界到热图的上边界。
+        # 6) Adjust color legend (g.cax) position
+        # Compute the blank area in the top-left:
+        # Horizontal: from left edge of row dendrogram to left edge of heatmap;
+        # Vertical: from top edge of column dendrogram to top edge of heatmap.
         empty_left = g.ax_row_dendrogram.get_position().x0
         empty_right = heatmap_pos.x0
         empty_width = empty_right - empty_left
@@ -150,7 +149,7 @@ def generate_cluster_distance_heatmap_from_path(
         empty_top = heatmap_pos.y0 + heatmap_pos.height
         empty_height = empty_top - empty_bottom
 
-        # 为避免 legend 太大，取空白区域的 80% 大小，并居中放置
+        # To avoid oversized legend, use 80% of the blank area and center it
         cbar_width = empty_width * 0.3
         cbar_height = empty_height * 0.7
         cbar_x = empty_left + (empty_width - cbar_width) / 2
@@ -158,15 +157,15 @@ def generate_cluster_distance_heatmap_from_path(
 
         g.cax.set_position([cbar_x, cbar_y, cbar_width, cbar_height])
 
-    # 设置轴标签和标题
+    # Set axis labels and title
     g.ax_heatmap.set_xlabel("Findee", fontsize=12)
     g.ax_heatmap.set_ylabel("Searcher", fontsize=12)
     g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
 
-    # 设置整个图形的标题，而不是 heatmap 的标题
+    # Set the overall figure title (not the heatmap title)
     g.fig.suptitle(f"SFplot of {sample}", fontsize=12, y=1)
 
-    # 7. 保存为带有样本名的 PDF
+    # 7. Save as PDF with sample name
     output_file = os.path.join(output_dir, f"SFplot_of_{sample}.pdf")
     plt.savefig(output_file, format="pdf", bbox_inches="tight")
     plt.close()
@@ -182,101 +181,101 @@ def generate_cluster_distance_heatmap_from_adata(
     figsize: tuple = (8, 8),
     cmap: str = "RdBu",
     max_scale: float = 10,
-    show_dendrogram: bool = True  # 新增参数：是否绘制 dendrogram，默认绘制
+    show_dendrogram: bool = True  # new parameter: whether to draw dendrogram (default: True)
 ):
     """
-    生成并保存每个细胞群到最近群中心的距离热图。
+    Generate and save a distance heatmap from each cell cluster to its nearest cluster center.
 
-    参数:
-    --------
+    Parameters:
+    ----------
     adata : anndata.AnnData
-        包含预处理数据的 AnnData 对象。
+        AnnData object containing preprocessed data.
     cluster_col : str, optional
-        `adata.obs` 中包含 cluster 信息的列名。默认为 "Cluster"。
+        Column name in `adata.obs` containing cluster information. Defaults to "Cluster".
     output_dir : Optional[str]
-        输出 PDF 文件的目录。默认为当前工作目录。
+        Output directory for the PDF file. Defaults to current working directory.
     output_filename : Optional[str]
-        输出文件的名称。如果未指定，将使用 "clustermap_output_{sample}.pdf" 格式。
+        Output file name. If not specified, uses "clustermap_output_{sample}.pdf".
     figsize : tuple, optional
-        热图的大小。默认为 (7, 7)。
+        Size of the heatmap. Defaults to (7, 7).
     cmap : str, optional
-        热图的颜色映射。默认为 "RdBu"。
+        Colormap for the heatmap. Defaults to "RdBu".
     max_scale : float, optional
-        `sc.pp.scale` 的 `max_value` 参数，用于裁剪 Z-score。默认为 10。
+        `max_value` parameter for `sc.pp.scale`, used to clip Z-scores. Defaults to 10.
 
-    返回值:
-    --------
+    Returns:
+    -------
     None
     """
-    # 设置输出目录
+    # Set output directory
     if output_dir is None:
         output_dir = os.getcwd()
     os.makedirs(output_dir, exist_ok=True)
 
-    # 检查 cluster_col 是否存在于 adata.obs
+    # Check whether cluster_col exists in adata.obs
     if cluster_col not in adata.obs.columns:
-        raise ValueError(f"'{cluster_col}' 不存在于 adata.obs 中。请检查列名。")
+        raise ValueError(f"'{cluster_col}' does not exist in adata.obs. Please check the column name.")
 
-    # 提取 cluster 信息
-    clusters = adata.obs[cluster_col].astype("category")  # cluster 信息
-    unique_clusters = clusters.cat.categories  # 不同的 cluster 列表
+    # Extract cluster information
+    clusters = adata.obs[cluster_col].astype("category")  # cluster information
+    unique_clusters = clusters.cat.categories  # list of unique clusters
 
-    # 1. 提取坐标信息
+    # 1. Extract coordinate information
     if "spatial" not in adata.obsm:
-        raise ValueError("'spatial' 坐标信息不存在于 adata.obsm 中。请确保数据包含空间坐标。")
-    coords = adata.obsm["spatial"]  # (n_cells, 2)或(n_cells, 3)
+        raise ValueError("'spatial' coordinate info does not exist in adata.obsm. Please ensure spatial coordinates are present.")
+    coords = adata.obsm["spatial"]  # (n_cells, 2) or (n_cells, 3)
 
-    # 2. 新建一个结果 DataFrame，用于存放各细胞到每个 cluster 最近中心的距离
-    #    注意这里使用 adata.obs["cell_id"] 作为行索引
+    # 2. Create a result DataFrame for storing nearest-cluster distances for each cell
+    #    Note: using adata.obs["cell_id"] as row index
     if "cell_id" not in adata.obs.columns:
-        raise ValueError("'cell_id' 列不存在于 adata.obs 中。请确保数据包含 'cell_id'。")
+        raise ValueError("'cell_id' column does not exist in adata.obs. Please ensure the data contains 'cell_id'.")
     df_nearest_cluster_dist = pd.DataFrame(
         index=adata.obs["cell_id"],
         columns=unique_clusters,
         dtype=float
     )
 
-    # 3. 对每个 cluster，构建邻居模型并查询所有细胞到该 cluster 的最近距离
+    # 3. For each cluster, build a nearest-neighbor model and query distances from all cells
     for c in unique_clusters:
-        # 3.1 取出该 cluster 下的细胞坐标
+        # 3.1 Extract coordinates for this cluster
         mask_c = (clusters == c)
         coords_c = coords[mask_c]
 
-        # 如果这个 cluster 没有细胞，则整个列都置为 NaN
+        # If this cluster has no cells, set the entire column to NaN
         if coords_c.shape[0] == 0:
             df_nearest_cluster_dist.loc[:, c] = np.nan
             continue
 
-        # 3.2 建立最近邻模型
+        # 3.2 Build nearest-neighbor model
         nbrs_c = NearestNeighbors(n_neighbors=1, algorithm="auto")
         nbrs_c.fit(coords_c)
 
-        # 3.3 查询所有细胞到该 cluster 最近的距离
+        # 3.3 Query nearest distances from all cells to this cluster
         dist_c, _ = nbrs_c.kneighbors(coords)
         df_nearest_cluster_dist[c] = dist_c[:, 0]
 
-    # 4. 将结果保存到 adata.uns 中（或其他合适的位置）
+    # 4. Save results to adata.uns (or another suitable location)
     adata.uns["nearest_cluster_dist"] = df_nearest_cluster_dist
 
-    # ------------------- 以下为距离矩阵的层次聚类可视化 -------------------
-    # 5. 建立一个 Series，让它的 index 也是 cell_id，值是 cluster，这样后续 groupby 才能对得上
+    # ------------------- Below: hierarchical clustering visualization of distance matrix -------------------
+    # 5. Build a Series with cell_id as index and cluster as values for groupby alignment
     clusters_by_id = pd.Series(
-        data=clusters.values,  # cluster 的值
-        index=adata.obs["cell_id"],  # 与 df_nearest_cluster_dist.index 对齐
+        data=clusters.values,  # cluster values
+        index=adata.obs["cell_id"],  # aligned with df_nearest_cluster_dist.index
         name=cluster_col
     )
 
-    # 以 cell_id 为索引，对 df_nearest_cluster_dist 按 cluster 分组并计算均值
+    # Group df_nearest_cluster_dist by cluster using cell_id as index and compute mean
     df_group_mean = df_nearest_cluster_dist.groupby(clusters_by_id).mean()
 
-    # 6. 删除整列全 NaN 的情况
+    # 6. Drop columns that are entirely NaN
     df_group_mean_clean = df_group_mean.dropna(axis=1, how="all")
 
     if df_group_mean_clean.empty:
-        print(f"Warning: df_group_mean_clean is empty. 请检查数据中是否存在 cluster。")
+        print(f"Warning: df_group_mean_clean is empty. Please check that clusters exist in the data.")
         return
 
-    # 用 clustermap 对该矩阵进行聚类可视化
+    # Visualize this matrix with clustermap
     plt.figure(figsize=figsize)
     g = sns.clustermap(
         df_group_mean_clean,
@@ -288,12 +287,12 @@ def generate_cluster_distance_heatmap_from_adata(
         annot=False
     )
 
-    # 3) 设置热图单元格为正方形
+    # 3) Set heatmap cells to be square
     g.ax_heatmap.set_aspect("equal")
 
-    # 如果绘制 dendrogram，则调整 dendrogram 和 color legend 的位置
+    # If drawing dendrogram, adjust dendrogram and color legend positions
     if show_dendrogram:
-        # 4) 修正行 dendrogram 与热图在 y 方向上的对齐
+        # 4) Fix row dendrogram alignment with heatmap in y direction
         row_dendro_pos = g.ax_row_dendrogram.get_position()
         heatmap_pos = g.ax_heatmap.get_position()
         g.ax_row_dendrogram.set_position([
@@ -303,7 +302,7 @@ def generate_cluster_distance_heatmap_from_adata(
             heatmap_pos.height
         ])
 
-        # 5) 修正列 dendrogram 与热图在 x 方向上的对齐
+        # 5) Fix column dendrogram alignment with heatmap in x direction
         col_dendro_pos = g.ax_col_dendrogram.get_position()
         g.ax_col_dendrogram.set_position([
             heatmap_pos.x0,
@@ -312,10 +311,10 @@ def generate_cluster_distance_heatmap_from_adata(
             col_dendro_pos.height
         ])
 
-        # 6) 调整 color legend（g.cax）位置
-        # 计算左上角的空白区域：
-        # 该区域的水平范围为：从 row dendrogram 的左边界到热图左边界；
-        # 垂直范围为：从 col dendrogram 的上边界到热图的上边界。
+        # 6) Adjust color legend (g.cax) position
+        # Compute the blank area in the top-left:
+        # Horizontal: from left edge of row dendrogram to left edge of heatmap;
+        # Vertical: from top edge of column dendrogram to top edge of heatmap.
         empty_left = g.ax_row_dendrogram.get_position().x0
         empty_right = heatmap_pos.x0
         empty_width = empty_right - empty_left
@@ -325,7 +324,7 @@ def generate_cluster_distance_heatmap_from_adata(
         empty_top = heatmap_pos.y0 + heatmap_pos.height
         empty_height = empty_top - empty_bottom
 
-        # 为避免 legend 太大，取空白区域的 80% 大小，并居中放置
+        # To avoid oversized legend, use 80% of the blank area and center it
         cbar_width = empty_width * 0.3
         cbar_height = empty_height * 0.7
         cbar_x = empty_left + (empty_width - cbar_width) / 2
@@ -333,16 +332,16 @@ def generate_cluster_distance_heatmap_from_adata(
 
         g.cax.set_position([cbar_x, cbar_y, cbar_width, cbar_height])
 
-    # 设置轴标签和标题
+    # Set axis labels and title
     g.ax_heatmap.set_xlabel("Findee", fontsize=12)
     g.ax_heatmap.set_ylabel("Searcher", fontsize=12)
     g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
 
-    # 设置整个图形的标题，而不是 heatmap 的标题
-    sample = adata.uns.get("sample", "Sample")  # 假设你在 adata.uns 中保存了样本名
+    # Set the overall figure title (not the heatmap title)
+    sample = adata.uns.get("sample", "Sample")  # assumes sample name is stored in adata.uns
     g.fig.suptitle(f"SFplot of {sample}", fontsize=12, y=1)
 
-    # 7. 保存为带有样本名的 PDF
+    # 7. Save as PDF with sample name
     if output_filename is None:
         output_filename = f"SFplot_of_{sample}.pdf"
     output_file = os.path.join(output_dir, output_filename)
@@ -379,89 +378,89 @@ def generate_cluster_distance_heatmap_from_df(
     output_filename: Optional[str] = None,
     figsize: tuple = (8, 8),
     cmap: str = "RdBu",
-    show_dendrogram: bool = True  # 是否绘制 dendrogram，默认绘制
+    show_dendrogram: bool = True  # whether to draw dendrogram (default: True)
 ):
     """
-    生成并保存每个细胞群到最近群中心的距离热图。
+    Generate and save a distance heatmap from each cell cluster to its nearest cluster center.
 
-    参数:
-    --------
+    Parameters:
+    ----------
     df : pd.DataFrame
-        包含细胞数据的 DataFrame。
+        DataFrame containing cell data.
     x_col : str, optional
-        表示 x 坐标的列名。默认为 'x'。
+        Column name for x coordinates. Defaults to 'x'.
     y_col : str, optional
-        表示 y 坐标的列名。默认为 'y'。
+        Column name for y coordinates. Defaults to 'y'.
     celltype_col : str, optional
-        表示细胞类型的列名。默认为 'celltype'。
+        Column name for cell type. Defaults to 'celltype'.
     output_dir : Optional[str]
-        输出 PDF 文件的目录。默认为当前工作目录。
+        Output directory for the PDF file. Defaults to current working directory.
     output_filename : Optional[str]
-        输出文件的名称。如果未指定，将使用 "clustermap_output.pdf" 格式。
+        Output file name. If not specified, uses "clustermap_output.pdf".
     figsize : tuple, optional
-        热图的大小。默认为 (8, 8)。
+        Size of the heatmap. Defaults to (8, 8).
     cmap : str, optional
-        热图的颜色映射。默认为 "RdBu"。
+        Colormap for the heatmap. Defaults to "RdBu".
 
-    返回值:
-    --------
+    Returns:
+    -------
     None
     """
-    # 设置输出目录
+    # Set output directory
     if output_dir is None:
         output_dir = os.getcwd()
     os.makedirs(output_dir, exist_ok=True)
 
-    # 检查必要的列是否存在于 DataFrame 中
+    # Check whether required columns exist in the DataFrame
     required_columns = {x_col, y_col, celltype_col}
     if not required_columns.issubset(df.columns):
-        raise ValueError(f"DataFrame 必须包含以下列：{required_columns}")
+        raise ValueError(f"DataFrame must contain the following columns: {required_columns}")
 
-    # 提取 cluster 信息
+    # Extract cluster information
     clusters = df[celltype_col].astype('category')
     unique_clusters = clusters.cat.categories
 
-    # 提取坐标信息
+    # Extract coordinate information
     coords = df[[x_col, y_col]].values  # (n_cells, 2)
 
-    # 新建一个结果 DataFrame，用于存放各细胞到每个 cluster 最近中心的距离
+    # Create a result DataFrame for storing nearest-cluster distances for each cell
     df_nearest_cluster_dist = pd.DataFrame(
         index=df.index,
         columns=unique_clusters,
         dtype=float
     )
 
-    # 对每个 cluster，构建邻居模型并查询所有细胞到该 cluster 的最近距离
+    # For each cluster, build a nearest-neighbor model and query distances
     for c in unique_clusters:
-        # 取出该 cluster 下的细胞坐标
+        # Extract coordinates for this cluster
         mask_c = (clusters == c)
         coords_c = coords[mask_c]
 
-        # 如果这个 cluster 没有细胞，则整列置为 NaN
+        # If this cluster has no cells, set the entire column to NaN
         if coords_c.shape[0] == 0:
             df_nearest_cluster_dist.loc[:, c] = np.nan
             continue
 
-        # 建立最近邻模型
+        # Build nearest-neighbor model
         nbrs_c = NearestNeighbors(n_neighbors=1, algorithm='auto')
         nbrs_c.fit(coords_c)
 
-        # 查询所有细胞到该 cluster 最近的距离
+        # Query nearest distances to this cluster
         dist_c, _ = nbrs_c.kneighbors(coords)
         df_nearest_cluster_dist[c] = dist_c[:, 0]
 
-    # ------------------- 以下为距离矩阵的层次聚类可视化 -------------------
-    # 以 celltype 为索引，对 df_nearest_cluster_dist 按 cluster 分组并计算均值
+    # ------------------- Below: hierarchical clustering visualization of distance matrix -------------------
+    # Group df_nearest_cluster_dist by cluster using celltype as index and compute mean
     df_group_mean = df_nearest_cluster_dist.groupby(clusters).mean()
 
-    # 删除整列全 NaN 的情况
+    # Drop columns that are entirely NaN
     df_group_mean_clean = df_group_mean.dropna(axis=1, how='all')
 
     if df_group_mean_clean.empty:
-        print("Warning: df_group_mean_clean is empty. 请检查数据中是否存在 cluster。")
+        print("Warning: df_group_mean_clean is empty. Please check that clusters exist in the data.")
         return
 
-    # 用 clustermap 对该矩阵进行聚类可视化
+    # Visualize this matrix with clustermap
     g = sns.clustermap(
         df_group_mean_clean,
         cmap=cmap,
@@ -472,12 +471,12 @@ def generate_cluster_distance_heatmap_from_df(
         annot=False
     )
 
-    # 设置热图单元格为正方形
+    # Set heatmap cells to be square
     g.ax_heatmap.set_aspect('equal')
 
-    # 如果绘制 dendrogram，则调整 dendrogram 和 color legend 的位置
+    # If drawing dendrogram, adjust dendrogram and color legend positions
     if show_dendrogram:
-        # 修正行 dendrogram 与热图在 y 方向上的对齐
+        # Fix row dendrogram alignment with heatmap in y direction
         row_dendro_pos = g.ax_row_dendrogram.get_position()
         heatmap_pos = g.ax_heatmap.get_position()
         g.ax_row_dendrogram.set_position([
@@ -487,7 +486,7 @@ def generate_cluster_distance_heatmap_from_df(
             heatmap_pos.height
         ])
 
-        # 修正列 dendrogram 与热图在 x 方向上的对齐
+        # Fix column dendrogram alignment with heatmap in x direction
         col_dendro_pos = g.ax_col_dendrogram.get_position()
         g.ax_col_dendrogram.set_position([
             heatmap_pos.x0,
@@ -496,7 +495,7 @@ def generate_cluster_distance_heatmap_from_df(
             col_dendro_pos.height
         ])
 
-        # 调整 color legend（g.cax）位置
+        # Adjust color legend (g.cax) position
         empty_left = g.ax_row_dendrogram.get_position().x0
         empty_right = heatmap_pos.x0
         empty_width = empty_right - empty_left
@@ -513,13 +512,13 @@ def generate_cluster_distance_heatmap_from_df(
 
         g.cax.set_position([cbar_x, cbar_y, cbar_width, cbar_height])
 
-    # 设置轴标签和标题
+    # Set axis labels and title
     g.ax_heatmap.set_xlabel("Findee", fontsize=12)
     g.ax_heatmap.set_ylabel("Searcher", fontsize=12)
     g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
     g.fig.suptitle(f"SFplot of {sample}", fontsize=12, y=1)
 
-    # 保存为 PDF
+    # Save as PDF
     if output_filename is None:
         output_filename = "clustermap_output.pdf"
     output_file = os.path.join(output_dir, output_filename)

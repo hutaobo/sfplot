@@ -16,26 +16,26 @@ def plot_circular_dendrogram_pycirclize(
     leaf_label_size: int = 6
 ):
     """
-    用 pyCirclize 绘制无缺口圆形树状图（PDF 矢量图）。
+    Draw a gapless circular dendrogram (PDF vector image) using pyCirclize.
 
-    参数
+    Parameters
     -------
-    matrix : DataFrame 或 ndarray
-        如果是方阵且对称，当作距离矩阵；否则当作特征矩阵。
+    matrix : DataFrame or ndarray
+        Treated as a distance matrix if square and symmetric; otherwise as a feature matrix.
     output_pdf : str
-        输出文件路径，例如 "./figures/tree.pdf"
+        Output file path, e.g. "./figures/tree.pdf"
     metric : str
-        pdist 距离度量（特征矩阵时才用到）。
+        pdist distance metric (used only for feature matrices).
     method : str
-        linkage 聚类方法。
+        Linkage clustering method.
     figsize : (w, h)
-        最终 PDF 画布大小（英寸）。
+        Final PDF canvas size in inches.
     r_lim : (inner, outer)
-        树的内外半径（pyCirclize 百分制坐标）。
+        Inner and outer radii of the tree (pyCirclize percent coordinates).
     leaf_label_size : int
-        叶子标签字号。
+        Font size for leaf labels.
     """
-    # ---------- 1. 解析数据 ----------
+    # ---------- 1. Parse data ----------
     if isinstance(matrix, pd.DataFrame):
         data = matrix.values
         labels = list(matrix.index)
@@ -43,7 +43,7 @@ def plot_circular_dendrogram_pycirclize(
         data = np.asarray(matrix)
         labels = [str(i) for i in range(data.shape[0])]
 
-    # ---------- 2. 生成距离并聚类 ----------
+    # ---------- 2. Generate distances and cluster ----------
     if data.shape[0] == data.shape[1] and np.allclose(data, data.T, atol=1e-8):
         dist_mat = data
     else:
@@ -65,8 +65,8 @@ def plot_circular_dendrogram_pycirclize(
     with open(tmp_nwk, "w") as f:
         f.write(newick_str)
 
-    # ---------- 4. 用 pyCirclize 绘图 ----------
-    circos, tv = Circos.initialize_from_tree(  # 没有 figsize 参数
+    # ---------- 4. Draw with pyCirclize ----------
+    circos, tv = Circos.initialize_from_tree(  # no figsize parameter
         tmp_nwk,
         r_lim=r_lim,
         leaf_label_size=leaf_label_size,
@@ -74,11 +74,11 @@ def plot_circular_dendrogram_pycirclize(
         label_formatter=lambda t: rf"$\it{{{t}}}$"
     )
 
-    fig = circos.plotfig()  # 返回 Matplotlib Figure
-    fig.set_size_inches(figsize)  # 这里再调整图像尺寸
+    fig = circos.plotfig()  # returns a Matplotlib Figure
+    fig.set_size_inches(figsize)  # adjust image size here
     fig.savefig(output_pdf, bbox_inches="tight")
     os.remove(tmp_nwk)
-    print(f"✓ 圆形树状图已保存：{output_pdf}")
+    print(f"✓ Circular dendrogram saved: {output_pdf}")
 
 
 # plot_circular_dendrogram_pycirclize(
@@ -87,5 +87,5 @@ def plot_circular_dendrogram_pycirclize(
 #     metric='euclidean',
 #     method='average',
 #     leaf_label_size=7,
-#     figsize=(13, 13)      # 需要更大就改这里
+#     figsize=(13, 13)      # increase this if a larger figure is needed
 # )
