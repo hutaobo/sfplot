@@ -15,12 +15,12 @@ from __future__ import annotations
 
 import os
 import sys
+import importlib
 from typing import Optional
 
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-from spatialdata_io import xenium
 
 # --- sfplot utilities -------------------------------------------------
 from ..preprocessing.data_processing import load_xenium_data
@@ -30,6 +30,18 @@ from .searcher_findee_score import (
 )
 
 # --------------------------------------------------------------------- #
+
+
+def _load_xenium_reader():
+    try:
+        return importlib.import_module("spatialdata_io").xenium
+    except ImportError as exc:
+        raise ImportError(
+            "transcript_by_cell_analysis_serial requires spatialdata_io and its spatialdata/ome_zarr/zarr "
+            "dependency stack. Please install compatible versions before using this helper."
+        ) from exc
+
+
 def _prepare_obs_df(
     adata,
     group_df: Optional[pd.DataFrame] = None,
@@ -126,6 +138,7 @@ def transcript_by_cell_analysis_serial(
     print(f"[{sample}] Loading data …")
     adata = load_xenium_data(folder, normalize=False)
 
+    xenium = _load_xenium_reader()
     sdata = xenium(
         folder,
         cells_boundaries=False,

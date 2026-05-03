@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import warnings
 import logging
+import importlib
 import os
 import sys
 import traceback
@@ -25,7 +26,6 @@ from .searcher_findee_score import (
     compute_cophenetic_distances_from_df,
     plot_cophenetic_heatmap,
 )
-from spatialdata_io import xenium
 from tqdm import tqdm
 
 # global logging and warnings configuration
@@ -44,6 +44,16 @@ _row_coph_global: Optional[pd.DataFrame] = None
 _coords_global: Optional[pd.DataFrame] = None
 _coph_method: str = "average"
 _shm: Optional[shared_memory.SharedMemory] = None
+
+
+def _load_xenium_reader():
+    try:
+        return importlib.import_module("spatialdata_io").xenium
+    except ImportError as exc:
+        raise ImportError(
+            "transcript_by_cell_analysis requires spatialdata_io and its spatialdata/ome_zarr/zarr "
+            "dependency stack. Please install compatible versions before using this helper."
+        ) from exc
 
 
 def _init_worker(shm_name, shm_shape, shm_dtype, adata_obs_df, row_coph_df, coph_method: str):
@@ -147,6 +157,7 @@ def transcript_by_cell_analysis(
 
     # load Xenium data and transcripts
     adata = load_xenium_data(folder, normalize=False)
+    xenium = _load_xenium_reader()
     sdata = xenium(
         folder,
         cells_boundaries=False, nucleus_boundaries=False,

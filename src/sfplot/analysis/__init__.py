@@ -23,6 +23,17 @@ from .ghost_searcher_with_findee import (
 from .split_utils import split_B_by_distance_to_A
 from .tbc_analysis import transcript_by_cell_analysis
 from .tbc_analysis_serial import transcript_by_cell_analysis_serial
+from .topology_extensions import (
+    build_entity_points_from_expression,
+    compute_entity_structuremap,
+    compute_entity_to_cell_topology,
+    compute_pathway_activity_matrix,
+    compute_weighted_cophenetic_distances_from_df,
+    compute_weighted_searcher_findee_distance_matrix_from_df,
+    ligand_receptor_target_consistency,
+    ligand_receptor_topology_analysis,
+    pathway_topology_analysis,
+)
 
 __all__ = [
     "compute_cophenetic_distances_from_adata",
@@ -40,6 +51,15 @@ __all__ = [
     "split_B_by_distance_to_A",
     "transcript_by_cell_analysis",
     "transcript_by_cell_analysis_serial",
+    "compute_weighted_searcher_findee_distance_matrix_from_df",
+    "compute_weighted_cophenetic_distances_from_df",
+    "compute_entity_to_cell_topology",
+    "compute_entity_structuremap",
+    "build_entity_points_from_expression",
+    "compute_pathway_activity_matrix",
+    "ligand_receptor_topology_analysis",
+    "ligand_receptor_target_consistency",
+    "pathway_topology_analysis",
 ]
 
 # GPU variants — only available when PyTorch is installed

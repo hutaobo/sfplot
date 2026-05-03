@@ -1,10 +1,21 @@
 from pathlib import Path
+import importlib
 import os
 import shutil
 import tempfile
 
 import pandas as pd
-from spatialdata_io import visium
+
+
+def _load_visium_reader():
+    try:
+        return importlib.import_module("spatialdata_io").visium
+    except ImportError as exc:
+        raise ImportError(
+            "read_visium_bin requires spatialdata_io and its spatialdata/ome_zarr/zarr "
+            "dependency stack. Please install compatible versions before using this helper."
+        ) from exc
+
 
 def read_visium_bin(base: Path, dataset_id: str, use_filtered: bool = True, keep_tmp: bool = False):
     """
@@ -63,6 +74,7 @@ def read_visium_bin(base: Path, dataset_id: str, use_filtered: bool = True, keep
 
     try:
         # Call visium: without passing tissue_positions_file, let it auto-discover
+        visium = _load_visium_reader()
         sdata = visium(
             path=shadow_dir,
             dataset_id=dataset_id,

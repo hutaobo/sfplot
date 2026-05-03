@@ -15,6 +15,7 @@ _LAZY_EXPORTS = {
     "plotting": (".plotting", None),
     # preprocessing
     "load_xenium_data": (".preprocessing.data_processing", "load_xenium_data"),
+    "load_xenium_table_bundle": (".preprocessing.data_processing", "load_xenium_table_bundle"),
     "read_visium_bin": (".preprocessing.visium_preprocessing", "read_visium_bin"),
     "merge_xenium_clusters_into_adata": (
         ".preprocessing.xenium_preprocessing",
@@ -60,6 +61,42 @@ _LAZY_EXPORTS = {
     "compute_searcher_findee_distance_matrix_from_df": (
         ".analysis.searcher_findee_score",
         "compute_searcher_findee_distance_matrix_from_df",
+    ),
+    "compute_weighted_searcher_findee_distance_matrix_from_df": (
+        ".analysis.topology_extensions",
+        "compute_weighted_searcher_findee_distance_matrix_from_df",
+    ),
+    "compute_weighted_cophenetic_distances_from_df": (
+        ".analysis.topology_extensions",
+        "compute_weighted_cophenetic_distances_from_df",
+    ),
+    "compute_entity_to_cell_topology": (
+        ".analysis.topology_extensions",
+        "compute_entity_to_cell_topology",
+    ),
+    "compute_entity_structuremap": (
+        ".analysis.topology_extensions",
+        "compute_entity_structuremap",
+    ),
+    "build_entity_points_from_expression": (
+        ".analysis.topology_extensions",
+        "build_entity_points_from_expression",
+    ),
+    "compute_pathway_activity_matrix": (
+        ".analysis.topology_extensions",
+        "compute_pathway_activity_matrix",
+    ),
+    "ligand_receptor_topology_analysis": (
+        ".analysis.topology_extensions",
+        "ligand_receptor_topology_analysis",
+    ),
+    "ligand_receptor_target_consistency": (
+        ".analysis.topology_extensions",
+        "ligand_receptor_target_consistency",
+    ),
+    "pathway_topology_analysis": (
+        ".analysis.topology_extensions",
+        "pathway_topology_analysis",
     ),
     "compute_cophenetic_distances_from_df_memory_opt": (
         ".analysis.compute_cophenetic_distances_from_df_memory_opt",

@@ -1,10 +1,11 @@
 """Preprocessing subpackage: data loading and spatial-data wrangling."""
 
-from .data_processing import load_xenium_data
+from .data_processing import load_xenium_data, load_xenium_table_bundle
 from .visium_preprocessing import read_visium_bin
 
 __all__ = [
     "load_xenium_data",
+    "load_xenium_table_bundle",
     "read_visium_bin",
 ]
 

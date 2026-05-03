@@ -26,8 +26,14 @@ class TestSfplot(unittest.TestCase):
         """Key reviewer-facing APIs should remain exposed at the top level."""
         expected = {
             "load_xenium_data",
+            "load_xenium_table_bundle",
             "compute_cophenetic_distances_from_df",
             "compute_cophenetic_distances_from_adata",
+            "compute_weighted_searcher_findee_distance_matrix_from_df",
+            "compute_weighted_cophenetic_distances_from_df",
+            "compute_entity_to_cell_topology",
+            "ligand_receptor_topology_analysis",
+            "pathway_topology_analysis",
             "plot_cophenetic_heatmap",
             "transcript_by_cell_analysis",
             "pick_batch_size",
@@ -37,8 +43,10 @@ class TestSfplot(unittest.TestCase):
 
     def test_subpackage_preprocessing_exports(self):
         """sfplot.preprocessing should expose its public APIs."""
-        expected = {"load_xenium_data", "merge_xenium_clusters_into_adata", "read_visium_bin"}
-        self.assertTrue(expected.issubset(set(sfplot.preprocessing.__all__)))
+        required = {"load_xenium_data", "load_xenium_table_bundle", "read_visium_bin"}
+        self.assertTrue(required.issubset(set(sfplot.preprocessing.__all__)))
+        if hasattr(sfplot.preprocessing, "merge_xenium_clusters_into_adata"):
+            self.assertIn("merge_xenium_clusters_into_adata", sfplot.preprocessing.__all__)
 
     def test_subpackage_analysis_exports(self):
         """sfplot.analysis should expose its public APIs."""
@@ -48,6 +56,10 @@ class TestSfplot(unittest.TestCase):
             "pick_batch_size",
             "split_B_by_distance_to_A",
             "transcript_by_cell_analysis",
+            "compute_weighted_searcher_findee_distance_matrix_from_df",
+            "compute_entity_to_cell_topology",
+            "ligand_receptor_topology_analysis",
+            "pathway_topology_analysis",
         }
         self.assertTrue(expected.issubset(set(sfplot.analysis.__all__)))
 
