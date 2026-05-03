@@ -10,68 +10,69 @@ from sklearn.neighbors import NearestNeighbors
 
 def compute_col_dendrogram_scores(
     data: Union['anndata.AnnData', pd.DataFrame],
-    input_type: str = "adata",  # "adata" 或 "dataframe"
+    input_type: str = "adata",  # "adata" or "dataframe"
     cluster_col: str = "Cluster",
-    x_col: str = "x",  # DataFrame中x轴坐标的列名
-    y_col: str = "y",  # DataFrame中y轴坐标的列名
-    cell_id_col: Optional[str] = None,  # DataFrame中细胞id列名，若为 None，则自动生成
+    x_col: str = "x",  # column name for x-axis coordinates in DataFrame
+    y_col: str = "y",  # column name for y-axis coordinates in DataFrame
+    cell_id_col: Optional[str] = None,  # cell id column name in DataFrame; auto-generated if None
     output_dir: Optional[str] = None,
     method: str = "average"
 ) -> dict:
     """
-    根据输入数据（anndata 对象或 DataFrame），计算用于聚类的均值矩阵，
-    并对列方向（cluster）的 linkage 生成 dendrogram（树状结构），
-    从上到下为每个分叉赋分（第一层得1分，第二层得0.5分，依次类推）。
+    Compute a mean matrix for clustering from input data (anndata object or DataFrame),
+    and generate a dendrogram (tree structure) from the column-direction (cluster) linkage.
+    Scores are assigned to each split from top to bottom (level 1 gets 1 point, level 2 gets 0.5 points, etc.).
 
-    参数说明：
-      data: 输入数据，类型为 anndata.AnnData 或 pandas.DataFrame
-      input_type: "adata" 或 "dataframe"，用于指定数据类型
-      cluster_col: 指定包含 cluster 信息的列名
-      x_col, y_col: 如果输入为 DataFrame，则用于指定存储坐标的列名
-      cell_id_col: 如果输入为 DataFrame，则指定细胞 id 的列名；
-                   若为 None，则自动生成一个 cell id 列，格式为 "cell_0", "cell_1", …
-      output_dir: 结果输出目录（用于保存中间结果），默认为当前工作目录
-      method: linkage 的方法参数，默认为 "average"
+    Parameters:
+      data: input data, type anndata.AnnData or pandas.DataFrame
+      input_type: "adata" or "dataframe", specifies the data type
+      cluster_col: column name containing cluster information
+      x_col, y_col: if input is DataFrame, specifies the coordinate column names
+      cell_id_col: if input is DataFrame, specifies the cell id column name;
+                   if None, a cell id column is auto-generated as "cell_0", "cell_1", ...
+      output_dir: output directory for saving intermediate results; defaults to current working directory
+      method: linkage method parameter, defaults to "average"
 
-    返回：
-      一个字典，描述了 dendrogram 的结构、每个节点的距离、赋分，以及对于叶子节点包含实际的 cluster 名称（"name" 键）。
+    Returns:
+      A dict describing the dendrogram structure, distances, scores, and for leaf nodes
+      the actual cluster name (under the "name" key).
     """
-    # 0. 处理输出目录
+    # 0. Handle output directory
     if output_dir is None:
         output_dir = os.getcwd()
     os.makedirs(output_dir, exist_ok=True)
 
     if input_type == "dataframe":
-        # 使用 DataFrame 数据
+        # Use DataFrame data
         df = data.copy()
         if cluster_col not in df.columns:
-            raise ValueError(f"'{cluster_col}' 不存在于输入的 DataFrame 中。")
+            raise ValueError(f"'{cluster_col}' does not exist in the input DataFrame.")
         clusters = df[cluster_col].astype("category")
         unique_clusters = clusters.cat.categories
 
-        # 检查坐标列
+        # Check coordinate columns
         if not set([x_col, y_col]).issubset(df.columns):
-            raise ValueError(f"输入的 DataFrame 必须包含坐标列：'{x_col}' 和 '{y_col}'。")
+            raise ValueError(f"The input DataFrame must contain coordinate columns: '{x_col}' and '{y_col}'.")
         coords = df[[x_col, y_col]].values
 
-        # 获取细胞 id：如果 cell_id_col 为 None，则自动生成
+        # Get cell id: auto-generate if cell_id_col is None
         if cell_id_col is not None:
             if cell_id_col not in df.columns:
-                raise ValueError(f"'{cell_id_col}' 不存在于输入的 DataFrame 中。")
+                raise ValueError(f"'{cell_id_col}' does not exist in the input DataFrame.")
             cell_ids = df[cell_id_col]
         else:
-            # 自动生成 cell id 列并添加到 DataFrame
+            # Auto-generate cell id column and add to DataFrame
             df["cell_id"] = ["cell_" + str(i) for i in range(len(df))]
             cell_ids = df["cell_id"]
 
-        # 构建一个 DataFrame, 行为 cell_ids, 列为 cluster
+        # Build a DataFrame with rows as cell_ids and columns as cluster
         df_nearest_cluster_dist = pd.DataFrame(
             index=cell_ids,
             columns=unique_clusters,
             dtype=float
         )
 
-        # 对每个 cluster，用最近邻模型计算所有细胞到该 cluster 最近中心的距离
+        # For each cluster, use nearest-neighbor model to compute distance from all cells
         for c in unique_clusters:
             mask_c = (clusters == c)
             coords_c = coords[mask_c.values]
@@ -83,7 +84,7 @@ def compute_col_dendrogram_scores(
             dist_c, _ = nbrs_c.kneighbors(coords)
             df_nearest_cluster_dist[c] = dist_c[:, 0]
 
-        # 构建用于分组计算均值的 Series，索引为 cell_ids，值为 cluster 信息
+        # Build a Series for groupby mean, with cell_ids as index and cluster as values
         clusters_by_id = pd.Series(
             data=clusters.values,
             index=cell_ids,
@@ -92,18 +93,18 @@ def compute_col_dendrogram_scores(
         df_group_mean = df_nearest_cluster_dist.groupby(clusters_by_id).mean()
 
     elif input_type == "adata":
-        # 使用 anndata 对象
+        # Use anndata object
         if cluster_col not in data.obs.columns:
-            raise ValueError(f"'{cluster_col}' 不存在于 data.obs 中。请检查列名。")
+            raise ValueError(f"'{cluster_col}' does not exist in data.obs. Please check the column name.")
         clusters = data.obs[cluster_col].astype("category")
         unique_clusters = clusters.cat.categories
 
         if "spatial" not in data.obsm:
-            raise ValueError("'spatial' 坐标信息不存在于 data.obsm 中。请确保数据包含空间坐标。")
+            raise ValueError("'spatial' coordinate info does not exist in data.obsm. Please ensure spatial coordinates are present.")
         coords = data.obsm["spatial"]
 
         if cell_id_col not in data.obs.columns:
-            raise ValueError(f"'{cell_id_col}' 不存在于 data.obs 中。请确保数据包含该列。")
+            raise ValueError(f"'{cell_id_col}' does not exist in data.obs. Please ensure the data contains this column.")
         cell_ids = data.obs[cell_id_col]
 
         df_nearest_cluster_dist = pd.DataFrame(
@@ -123,7 +124,7 @@ def compute_col_dendrogram_scores(
             dist_c, _ = nbrs_c.kneighbors(coords)
             df_nearest_cluster_dist[c] = dist_c[:, 0]
 
-        # 保存结果到 data.uns
+        # Save results to data.uns
         data.uns["nearest_cluster_dist"] = df_nearest_cluster_dist
 
         clusters_by_id = pd.Series(
@@ -133,23 +134,23 @@ def compute_col_dendrogram_scores(
         )
         df_group_mean = df_nearest_cluster_dist.groupby(clusters_by_id).mean()
     else:
-        raise ValueError("input_type 参数必须为 'adata' 或 'dataframe'.")
+        raise ValueError("input_type must be 'adata' or 'dataframe'.")
 
-    # 处理均值矩阵，删除全为 NaN 的列
+    # Process mean matrix, drop all-NaN columns
     df_group_mean_clean = df_group_mean.dropna(axis=1, how="all")
     if df_group_mean_clean.empty:
-        raise ValueError("数据处理后为空，请检查输入数据。")
+        raise ValueError("Data is empty after processing, please check input data.")
 
-    # 构造叶子名称映射：df_group_mean_clean 的列为实际的 cluster 名称
+    # Build leaf name mapping: columns of df_group_mean_clean are actual cluster names
     leaf_names = {i: name for i, name in enumerate(df_group_mean_clean.columns)}
 
-    # 计算列方向（cluster）的 linkage（对转置后的数据进行聚类）
+    # Compute column-direction (cluster) linkage (cluster the transposed data)
     col_linkage = linkage(df_group_mean_clean.T, method=method)
 
-    # 将 linkage 转换为树状结构
+    # Convert linkage to tree structure
     root, _ = to_tree(col_linkage, rd=True)
 
-    # 递归函数：为树中每个分叉赋分（从上到下，每下降一层分数减半）
+    # Recursive function: assign scores to each split (score halves with each level down)
     def assign_score(node, level=1):
         if node.left is not None and node.right is not None:
             score = 1 / (2 ** (level - 1))
@@ -160,7 +161,7 @@ def compute_col_dendrogram_scores(
 
     assign_score(root, level=1)
 
-    # 递归函数：将树状结构转换为字典表示，对于叶子节点，额外保存实际的 cluster 名称（"name" 键）
+    # Recursive function: convert tree to dict; for leaf nodes, also store actual cluster name under "name"
     def tree_to_dict(node):
         if node.left is None and node.right is None:
             return {
@@ -184,8 +185,8 @@ def compute_col_dendrogram_scores(
     dendrogram_dict = tree_to_dict(root)
     return dendrogram_dict
 
-# 使用示例：
-# 对于 DataFrame 输入且未提供 cell_id_col（自动生成 cell id）：
+# Usage example:
+# For DataFrame input without providing cell_id_col (auto-generate cell id):
 #
 # df = pd.DataFrame({
 #     "Location_Center_X": [0.1, 0.3, 0.2, 0.8, 0.85],

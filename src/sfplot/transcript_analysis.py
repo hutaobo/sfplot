@@ -30,11 +30,11 @@ df_obs = adata.obs[['x', 'y', 'celltype']]
 df_transcripts = transcripts_pdf[transcripts_pdf['feature_name'] == 'AAMP'][['x', 'y', 'feature_name']]
 df_transcripts = df_transcripts.rename(columns={'feature_name': 'celltype'})
 
-# 并行计算
+# Parallel computation
 results = Parallel(n_jobs=-1, prefer="threads")(
     delayed(process_gene)(gene, adata, transcripts_pdf)
     for gene in tqdm(adata.var.index, desc="Processing genes")
 )
 
-# 合并所有结果为一个DataFrame
+# Merge all results into a single DataFrame
 result = pd.concat(results, axis=0)

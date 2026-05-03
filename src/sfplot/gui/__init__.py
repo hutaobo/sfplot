@@ -1,7 +1,7 @@
 # src/sfplot/gui/__init__.py
 
 """
-sfplot.gui 子包，提供图形界面入口。
+sfplot.gui subpackage providing the graphical user interface entry point.
 """
 
 from .gui_app import main
