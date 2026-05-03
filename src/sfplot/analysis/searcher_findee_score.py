@@ -321,6 +321,7 @@ from typing import Optional, Tuple
 
 import matplotlib as mpl
 import matplotlib.font_manager as fm
+mpl.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd

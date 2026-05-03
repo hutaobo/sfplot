@@ -1,9 +1,9 @@
+import importlib
 import os
 import tarfile
 
 import h5py
 import pandas as pd
-import scanpy as sc
 from spatialdata_io import xenium
 
 
@@ -156,6 +156,7 @@ def load_xenium_data(folder: str, normalize: bool = True):
     adata.raw = adata
 
     if normalize:
+        sc = importlib.import_module("scanpy")
         sc.pp.normalize_total(adata, target_sum=1e4)
         sc.pp.log1p(adata)
         sc.pp.scale(adata, max_value=10)

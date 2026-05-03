@@ -111,6 +111,8 @@ ENV/
 # Local workspaces that should stay out of the repo
 benchmarking/
 sfplot-manuscript/
+.codex_tmp/
+!CellGPS.spec
 
 # Windows thumbnail cache
 Thumbs.db
