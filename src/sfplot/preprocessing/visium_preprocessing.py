@@ -8,19 +8,19 @@ from spatialdata_io import visium
 
 def read_visium_bin(base: Path, dataset_id: str, use_filtered: bool = True, keep_tmp: bool = False):
     """
-    适配 spatialdata-io 0.3.0, 读取含 Parquet 坐标的 Visium HD 输出
-    不向 base 写任何文件
+    Adapter for spatialdata-io 0.3.0, reads Visium HD output containing Parquet coordinates.
+    Does not write any files to base.
     """
     spatial_dir = base / "spatial"
     pqt = spatial_dir / "tissue_positions.parquet"
     if not pqt.exists():
-        raise FileNotFoundError(f"{pqt} 不存在")
+        raise FileNotFoundError(f"{pqt} does not exist")
 
     pos = pd.read_parquet(pqt)
     if "barcode" not in pos.columns:
         pos = pos.rename_axis("barcode").reset_index()
 
-    # 统一列名
+    # Normalize column names
     rename = {}
     if "array_row" not in pos.columns:
         for cand in ["row", "array_y", "grid_y", "spot_row"]:
@@ -42,17 +42,17 @@ def read_visium_bin(base: Path, dataset_id: str, use_filtered: bool = True, keep
         if need not in pos.columns: pos[need] = 0
     pos = pos[["barcode","in_tissue","array_row","array_col","pxl_row_in_fullres","pxl_col_in_fullres"]]
 
-    # 创建影子目录结构
+    # Create shadow directory structure
     shadow_dir = Path(tempfile.mkdtemp(prefix=f"visium_shadow_{dataset_id}_"))
     shadow_spatial = shadow_dir / "spatial"
     shadow_spatial.mkdir(parents=True, exist_ok=True)
 
-    # 写出 tissue_positions_list.csv (无表头)
+    # Write tissue_positions_list.csv (no header)
     pos.to_csv(shadow_spatial / "tissue_positions_list.csv", index=False, header=False)
-    # 拷贝 scalefactors
+    # Copy scalefactors
     shutil.copy2(spatial_dir / "scalefactors_json.json", shadow_spatial / "scalefactors_json.json")
 
-    # 链接或复制 counts
+    # Symlink or copy counts
     counts_file = "filtered_feature_bc_matrix.h5" if use_filtered else "raw_feature_bc_matrix.h5"
     counts_src = base / counts_file
     counts_shadow = shadow_dir / counts_file
@@ -62,7 +62,7 @@ def read_visium_bin(base: Path, dataset_id: str, use_filtered: bool = True, keep
         shutil.copy2(counts_src, counts_shadow)
 
     try:
-        # 调用 visium：不传 tissue_positions_file，让它自动发现
+        # Call visium: without passing tissue_positions_file, let it auto-discover
         sdata = visium(
             path=shadow_dir,
             dataset_id=dataset_id,

@@ -19,33 +19,34 @@ def generate_TCR_distance_heatmap_from_df(
     dropna_axis: str = "columns"
 ):
     """
-    根据 df_tr_subset 中的坐标 (x, y) 以及 cluster 信息 (feature_name)，计算每个细胞/行到各 cluster 最近中心的距离，
-    并对距离矩阵按 cluster 分组求均值，再用 clustermap 进行层次聚类热图可视化。
+    Compute the nearest-cluster distance for each cell/row in df_tr_subset using (x, y) coordinates
+    and cluster information (feature_name). Group by cluster to compute mean distances, then visualize
+    with a hierarchical clustering heatmap (clustermap).
 
-    同时演示：
-    1. 手动缩小并移动颜色 legend。
-    2. 在热图方格保持正方形的情况下，对齐行/列 dendrogram。
+    Also demonstrates:
+    1. Manually shrinking and repositioning the color legend.
+    2. Aligning row/column dendrograms while keeping heatmap cells square.
     """
 
-    # 若未指定输出目录，则使用当前工作目录
+    # Use current working directory if output_dir is not specified
     if output_dir is None:
         output_dir = os.getcwd()
     os.makedirs(output_dir, exist_ok=True)
 
     # ------------------------
-    # 1. 准备坐标和 cluster 信息
+    # 1. Prepare coordinates and cluster information
     # ------------------------
     coords = df_tr_subset[[x_col, y_col]].values  # shape: (n_cells, 2)
     clusters = df_tr_subset[cluster_col].astype("category")
     unique_clusters = clusters.cat.categories
 
     # ------------------------
-    # 2. 建立空的距离矩阵 DF
+    # 2. Build empty distance matrix DataFrame
     # ------------------------
     df_nearest_cluster_dist = pd.DataFrame(index=df_tr_subset.index, dtype=float)
 
     # ------------------------
-    # 3. 对每个 cluster，计算距离
+    # 3. Compute distances for each cluster
     # ------------------------
     for c in unique_clusters:
         mask_c = (clusters == c)
@@ -58,18 +59,18 @@ def generate_TCR_distance_heatmap_from_df(
         df_nearest_cluster_dist[c] = dist_c[:, 0]
 
     # ------------------------
-    # 4. 分组聚合 (按 cluster)
+    # 4. Group aggregation (by cluster)
     # ------------------------
     clusters_by_id = pd.Series(data=clusters.values, index=df_tr_subset.index, name=cluster_col)
     df_group_mean = df_nearest_cluster_dist.groupby(clusters_by_id).mean()
 
     # ------------------------
-    # 5. 替换 inf/-inf 为 NaN
+    # 5. Replace inf/-inf with NaN
     # ------------------------
     df_group_mean = df_group_mean.replace([np.inf, -np.inf], np.nan)
 
     # ------------------------
-    # 6. 根据 dropna_axis 删除全 NaN 行/列 (可选)
+    # 6. Drop all-NaN rows/columns according to dropna_axis (optional)
     # ------------------------
     if dropna_axis in ["rows", "index"]:
         df_group_mean = df_group_mean.dropna(axis=0, how="all")
@@ -77,29 +78,29 @@ def generate_TCR_distance_heatmap_from_df(
         df_group_mean = df_group_mean.dropna(axis=1, how="all")
     elif dropna_axis == "both":
         df_group_mean = df_group_mean.dropna(axis=0, how="all").dropna(axis=1, how="all")
-    # 如果是 "none" 则不做任何全空丢弃
+    # If "none", skip all-empty dropping
 
     # ------------------------
-    # 7. 删除任何包含 NaN 的行/列，确保输入全为 finite
+    # 7. Drop any row/column containing NaN to ensure all-finite input
     # ------------------------
     df_group_mean = df_group_mean.dropna(axis=0, how="any")
     df_group_mean = df_group_mean.dropna(axis=1, how="any")
 
     # ------------------------
-    # 8. 最终检查是否还有 NaN / inf
+    # 8. Final check for remaining NaN / inf
     # ------------------------
     if not np.all(np.isfinite(df_group_mean.values)):
         print(f"[Error] Even after cleaning, df_group_mean still has non-finite values for sample={sample}.")
         return
 
-    # 若清理后已经没有足够行或列（至少需要 >=2），则无法做层次聚类
+    # If fewer than 2 rows or columns remain after cleaning, clustering is not possible
     if df_group_mean.shape[0] < 2 or df_group_mean.shape[1] < 2:
         print(f"Warning: After cleaning, df_group_mean shape={df_group_mean.shape}, not enough for clustermap.")
         return
 
-    # ============ 这里开始是核心画图部分，包含颜色条和对齐的改动 ============
+    # ============ Core plotting section starts here, including colorbar and alignment changes ============
 
-    # 9. clustermap 可视化
+    # 9. clustermap visualization
     plt.figure(figsize=figsize)
     g = sns.clustermap(
         df_group_mean,
@@ -109,51 +110,51 @@ def generate_TCR_distance_heatmap_from_df(
         col_cluster=True,
         linewidths=0.5,
         annot=False,
-        # 设置 colorbar 的位置和大小（相对于整幅图的百分比）
-        # (x, y, width, height), 取值一般在 [0,1] 之间
-        # x=0：距离图左边界 2% 的位置
-        # y=0.9：距离图底部 90% 的位置（也就是比较靠上）
-        # width=0.03：颜色条宽度占整图宽度的 3%
-        # height=0.09：颜色条高度占整图高度的 9%
+        # Set colorbar position and size (as fraction of the entire figure)
+        # (x, y, width, height), values typically in [0,1]
+        # x=0: 2% from the left edge of the figure
+        # y=0.9: 90% up from the bottom of the figure (near the top)
+        # width=0.03: colorbar width is 3% of total figure width
+        # height=0.09: colorbar height is 9% of total figure height
         cbar_pos=(0, 0.9, 0.03, 0.09),
-        cbar_kws={"orientation": "vertical"}  # 竖直放置，可自行改成 "horizontal"
+        cbar_kws={"orientation": "vertical"}  # vertical placement; change to "horizontal" if preferred
     )
 
-    # 设置热图单元格为正方形
+    # Set heatmap cells to be square
     g.ax_heatmap.set_aspect("equal")
 
-    # 修正行 dendrogram 与热图在 y 方向上的对齐
-    # 拿到各自的 (x0, y0, width, height)
+    # Fix row dendrogram alignment with heatmap in the y direction
+    # Get (x0, y0, width, height) for each
     row_dendro_pos = g.ax_row_dendrogram.get_position()
     heatmap_pos = g.ax_heatmap.get_position()
-    # 让行 dendrogram 的顶部和底部与热图对齐
+    # Align row dendrogram top and bottom with heatmap
     g.ax_row_dendrogram.set_position([
         row_dendro_pos.x0,
-        heatmap_pos.y0,          # 用热图的 y0
+        heatmap_pos.y0,          # use heatmap y0
         row_dendro_pos.width,
-        heatmap_pos.height       # 用热图的 height
+        heatmap_pos.height       # use heatmap height
     ])
 
-    # 同理，修正列 dendrogram 与热图在 x 方向上的对齐（可选）
+    # Similarly, fix column dendrogram alignment with heatmap in the x direction (optional)
     col_dendro_pos = g.ax_col_dendrogram.get_position()
     g.ax_col_dendrogram.set_position([
-        heatmap_pos.x0,          # 用热图的 x0
+        heatmap_pos.x0,          # use heatmap x0
         col_dendro_pos.y0,
-        heatmap_pos.width,       # 用热图的 width
+        heatmap_pos.width,       # use heatmap width
         col_dendro_pos.height
     ])
 
-    # 设置轴标签
+    # Set axis labels
     g.ax_heatmap.set_xlabel("Findee", fontsize=10)
     g.ax_heatmap.set_ylabel("Searcher", fontsize=10)
 
-    # y 轴标签旋转 0 度，方便阅读
+    # Rotate y-axis labels 0 degrees for readability
     g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
 
-    # 设置整个图形的标题
+    # Set the overall figure title
     g.fig.suptitle(f"TCR_SFplot of {sample}", fontsize=12, y=1.02)
 
-    # 10. 保存 PDF
+    # 10. Save PDF
     output_file = os.path.join(output_dir, f"TCR_SFplot_of_{sample}.pdf")
     plt.savefig(output_file, format="pdf", bbox_inches="tight")
     plt.close()

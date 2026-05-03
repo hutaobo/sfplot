@@ -96,16 +96,16 @@ def compute_cophenetic_distances_from_df_memory_opt(
     batch_size: Optional[int] = None
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
-    功能与原始 compute_cophenetic_distances_from_df 相同，但通过分批计算降低内存占用。
+    Same functionality as the original compute_cophenetic_distances_from_df, but reduces memory usage via batched computation.
     """
-    # 1. 必要列检查
+    # 1. Check required columns
     required_cols = {x_col, y_col, celltype_col}
     if z_col:
         required_cols.add(z_col)
     if not required_cols.issubset(df.columns):
-        raise ValueError(f"DataFrame 缺少必要列：{required_cols}")
+        raise ValueError(f"DataFrame is missing required columns: {required_cols}")
 
-    # 2. 提取簇信息和坐标
+    # 2. Extract cluster info and coordinates
     clusters = df[celltype_col].astype("category")
     unique_clusters = clusters.cat.categories
     coord_cols = [x_col, y_col] + ([z_col] if z_col else [])
@@ -113,36 +113,36 @@ def compute_cophenetic_distances_from_df_memory_opt(
     n_cells = coords.shape[0]
     n_clusters = len(unique_clusters)
 
-    # 3. 初始化簇间平均距离矩阵 (cluster × cluster)
-    #    用 DataFrame 方便按照簇标签对齐填值，初始全 NaN
+    # 3. Initialize inter-cluster average distance matrix (cluster × cluster)
+    #    Using DataFrame for easy label-aligned assignment; initially all NaN
     df_group_mean = pd.DataFrame(
         np.nan, index=unique_clusters, columns=unique_clusters, dtype=float
     )
 
-    # 4. 对每个簇计算所有细胞到该簇的最近邻距离，并计算均值
-    #    逐列计算，避免构建完整矩阵
-    # 可选批量大小：如果 batch_size 提供，则分批查询以节省内存
-    # 预先计算每个细胞的簇代码，以便快速分组
+    # 4. For each cluster, compute nearest-neighbor distances from all cells and average
+    #    Compute column-by-column to avoid building the full matrix
+    # Optional batch size: if batch_size is provided, query in batches to save memory
+    # Pre-compute cluster codes for each cell for fast grouping
     cluster_codes = clusters.cat.codes.values  # each cell's cluster code (int)
     for c_label in unique_clusters:
         mask_c = (clusters == c_label)
-        coords_c = coords[mask_c]  # 该簇的所有坐标
+        coords_c = coords[mask_c]  # all coordinates of this cluster
         if coords_c.shape[0] == 0:
-            # 若该簇没有细胞，则整列保持 NaN
+            # If this cluster has no cells, keep the entire column as NaN
             continue
-        # 建立该簇的1-NN模型
+        # Build 1-NN model for this cluster
         nbrs = NearestNeighbors(n_neighbors=1, algorithm="auto").fit(coords_c)
 
-        # 查询所有细胞到当前簇的距离，支持按批次查询
+        # Query distances from all cells to the current cluster, with optional batching
         if batch_size is None or batch_size >= n_cells:
-            # 一次性查询所有细胞
+            # Query all cells at once
             dist_all, _ = nbrs.kneighbors(coords)
-            dist_all = dist_all[:, 0]  # 提取距离列
-            # 依据预存的簇代码直接计算每个源簇的平均距离
+            dist_all = dist_all[:, 0]  # extract distance column
+            # Compute average distance per source cluster using pre-stored cluster codes
             sums = np.bincount(cluster_codes, weights=dist_all, minlength=n_clusters)
             counts = np.bincount(cluster_codes, minlength=n_clusters)
         else:
-            # 分批查询
+            # Batched query
             sums = np.zeros(n_clusters, dtype=float)
             counts = np.zeros(n_clusters, dtype=int)
             for start in range(0, n_cells, batch_size):
@@ -150,31 +150,31 @@ def compute_cophenetic_distances_from_df_memory_opt(
                 dist_batch, _ = nbrs.kneighbors(coords[start:end])
                 dist_batch = dist_batch[:, 0]
                 code_batch = cluster_codes[start:end]
-                # 累加该批次的距离和计数
+                # Accumulate distances and counts for this batch
                 sums += np.bincount(code_batch, weights=dist_batch, minlength=n_clusters)
                 counts += np.bincount(code_batch, minlength=n_clusters)
-        # 计算平均值（对有数据的簇）
+        # Compute mean (for clusters with data)
         means = np.divide(sums, counts, out=np.full_like(sums, np.nan, dtype=float), where=(counts>0))
-        # 将结果填入输出矩阵的对应列
+        # Fill results into the corresponding column of the output matrix
         df_group_mean.loc[:, c_label] = means
 
-    # 5. 清理全 NaN 列（如果有簇在任何其他簇中均无邻居，会出现该列全 NaN）
+    # 5. Drop all-NaN columns (if a cluster has no neighbors in any other cluster, that column is all NaN)
     df_group_mean_clean = df_group_mean.dropna(axis=1, how="all")
     if df_group_mean_clean.empty:
-        raise ValueError("df_group_mean_clean 为空，请检查数据。")
+        raise ValueError("df_group_mean_clean is empty, please check the data.")
 
-    # 6. 对行和列分别进行层次聚类
+    # 6. Perform hierarchical clustering separately on rows and columns
     row_linkage = linkage(df_group_mean_clean.values, method=method)
     col_linkage = linkage(df_group_mean_clean.T.values, method=method)
 
-    # 7. 计算 cophenetic 距离矩阵（condensed form），以及相关系数（可选打印）
+    # 7. Compute cophenetic distance matrix (condensed form) and correlation coefficient (optional print)
     row_coph_corr, row_coph_condensed = cophenet(row_linkage, pdist(df_group_mean_clean.values))
     col_coph_corr, col_coph_condensed = cophenet(col_linkage, pdist(df_group_mean_clean.T.values))
     if show_corr:
         print(f"Row cophenetic correlation: {row_coph_corr:.4f}")
         print(f"Col cophenetic correlation: {col_coph_corr:.4f}")
 
-    # 8. 将 condensed 距离转为方阵并构建 DataFrame
+    # 8. Convert condensed distances to square matrices and build DataFrames
     row_cophenetic_df = pd.DataFrame(squareform(row_coph_condensed),
                                      index=df_group_mean_clean.index,
                                      columns=df_group_mean_clean.index)
@@ -182,7 +182,7 @@ def compute_cophenetic_distances_from_df_memory_opt(
                                      index=df_group_mean_clean.columns,
                                      columns=df_group_mean_clean.columns)
 
-    # 9. 分别归一化行、列cophenetic距离矩阵到 [0, 1]
+    # 9. Normalize row and column cophenetic distance matrices separately to [0, 1]
     def normalize_df(mat: pd.DataFrame) -> pd.DataFrame:
         dmin, dmax = mat.values.min(), mat.values.max()
         return mat if dmin == dmax else (mat - dmin) / (dmax - dmin)

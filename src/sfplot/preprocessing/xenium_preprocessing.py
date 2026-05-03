@@ -5,16 +5,16 @@ import geopandas as gpd
 from shapely.geometry import Polygon
 from typing import List, Tuple, Dict
 
-# ========== 1.2) 工具：取表的链接键 ==========
+# ========== 1.2) Utility: get the table link key ==========
 def _get_instance_key(adata) -> str:
     """
-    SpatialData 约定的链接键一般在 adata.uns['spatialdata_attrs']['instance_key'] 中。
-    常见为 'instance_id' 或 'cell_id'。
+    The SpatialData link key is typically in adata.uns['spatialdata_attrs']['instance_key'].
+    Common values are 'instance_id' or 'cell_id'.
     """
     sdattrs = adata.uns.get("spatialdata_attrs", {}) if hasattr(adata, "uns") else {}
     return sdattrs.get("instance_key", "instance_id")
 
-# ========== 2) 合并 Xenium clustering 到 adata.obs ==========
+# ========== 2) Merge Xenium clustering into adata.obs ==========
 def merge_xenium_clusters_into_adata(
     sdata,
     xenium_dir: str,
@@ -24,19 +24,19 @@ def merge_xenium_clusters_into_adata(
     cluster_col: str = "Cluster",
 ) -> Tuple["anndata.AnnData", List[str], Dict[str, float]]:
     """
-    自动收集 xenium_dir/analysis/clustering/**/clusters.csv，
-    并把聚类列合并进 sdata.tables[table_key].obs。
-    优先用 obs['cell_id'] 连接；没有则尝试用 shapes 的索引映射。
-    返回 (adata, 新增列名列表, 每列非NA命中率报告)。
+    Auto-collect xenium_dir/analysis/clustering/**/clusters.csv
+    and merge clustering columns into sdata.tables[table_key].obs.
+    Prefers linking via obs['cell_id']; falls back to shapes index mapping if unavailable.
+    Returns (adata, list of new column names, per-column non-NA hit rate report).
     """
     adata = sdata.tables[table_key]
     obs = adata.obs
     obs_index = adata.obs_names.astype(str)
 
-    # 找 obs 里的条形码列（优先 cell_id）
+    # Find the barcode column in obs (prefer cell_id)
     obs_barcode_col = "cell_id" if "cell_id" in obs.columns else None
 
-    # 若没有，尝试从 cell_boundaries 构造 label_id->barcode 的映射（作为兜底）
+    # If not found, try building a label_id->barcode mapping from cell_boundaries (fallback)
     label_to_barcode = None
     if obs_barcode_col is None:
         cb_gdf = _get_cell_boundaries_gdf(sdata).reset_index()
@@ -52,7 +52,7 @@ def merge_xenium_clusters_into_adata(
             label_to_barcode = pd.Series(tmp[cell_id_col].astype(str).values,
                                          index=tmp["label_id_norm"].values)
 
-    # 遍历 clusters.csv
+    # Iterate over clusters.csv files
     pattern = os.path.join(xenium_dir, clustering_root, "**", "clusters.csv")
     files = sorted(glob.glob(pattern, recursive=True))
     if not files:
@@ -71,14 +71,14 @@ def merge_xenium_clusters_into_adata(
             colname = "xoa_" + dirname.replace("gene_expression_", "").replace("_clusters", "")
 
         df = pd.read_csv(f)
-        # 规范列
+        # Normalize column names
         cols = {c.lower(): c for c in df.columns}
         bcol = cols.get(barcode_col.lower()) or cols.get("barcode") or cols.get("barcodes")
         ccol = cols.get(cluster_col.lower()) or cols.get("cluster")
         if bcol is None or ccol is None:
-            raise ValueError(f"{f} 缺少条形码/聚类列（需要 {barcode_col}, {cluster_col}）")
+            raise ValueError(f"{f} is missing barcode/cluster columns (requires {barcode_col}, {cluster_col})")
 
-        # 三种路径：优先 cell_id；其次 label->barcode；最后用 obs_names 试试
+        # Three paths: prefer cell_id; then label->barcode; finally try obs_names
         if obs_barcode_col is not None:
             mapper = pd.Series(df[ccol].values, index=df[bcol].astype(str))
             adata.obs[colname] = adata.obs[obs_barcode_col].astype(str).map(mapper)
@@ -90,7 +90,7 @@ def merge_xenium_clusters_into_adata(
             idx_norm = adata.obs_names.astype(str).map(_norm)
             adata.obs[colname] = idx_norm.map(label_to_barcode).map(bc_to_cluster)
         else:
-            # 兜底（通常命中率低）
+            # Fallback (usually low hit rate)
             mapper = pd.Series(df[ccol].values, index=df[bcol].astype(str))
             adata.obs[colname] = obs_index.map(mapper)
 
@@ -100,7 +100,7 @@ def merge_xenium_clusters_into_adata(
 
     return adata, added_cols, hitrate
 
-# ========== 3) 规范化 transcripts 列名，尽量对齐 XOA 规范 ==========
+# ========== 3) Normalize transcript column names to align with XOA conventions ==========
 def _normalize_transcript_columns(df: pd.DataFrame) -> pd.DataFrame:
     ren = {}
     if "x_location" not in df.columns:
@@ -118,16 +118,16 @@ def _normalize_transcript_columns(df: pd.DataFrame) -> pd.DataFrame:
         df = df.rename(columns=ren)
     return df
 
-# ========== 3.1) 工具：把 transcripts 变成 GeoDataFrame ==========
+# ========== 3.1) Utility: convert transcripts to GeoDataFrame ==========
 def _transcripts_to_gdf(tx_df: pd.DataFrame) -> gpd.GeoDataFrame:
     """
-    根据列名猜测 x/y，并转换为 GeoDataFrame（crs=None）。
+    Guess x/y column names and convert to GeoDataFrame (crs=None).
     """
     x_candidates = ["x_location", "x", "X", "x_um", "global_x"]
     y_candidates = ["y_location", "y", "Y", "y_um", "global_y"]
     xcol = next((c for c in x_candidates if c in tx_df.columns), None)
     ycol = next((c for c in y_candidates if c in tx_df.columns), None)
     if xcol is None or ycol is None:
-        raise KeyError("transcripts 缺少 x/y 坐标列（未能从常见列名中识别）。")
+        raise KeyError("transcripts is missing x/y coordinate columns (could not identify from common column names).")
     geom = gpd.points_from_xy(tx_df[xcol], tx_df[ycol])
     return gpd.GeoDataFrame(tx_df.copy(), geometry=geom, crs=None)
